@@ -1,0 +1,6 @@
+{
+  "name": "AgentOS - Factoría de Desarrollo Agéntico",
+  "description": "Sistema operativo de desarrollo agéntico multi-capa: orquestación de grafos de nodos, carriles de ejecución, telemetría en tiempo real y supervisión operativa de agentes de código.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

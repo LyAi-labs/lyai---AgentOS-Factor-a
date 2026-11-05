@@ -1,0 +1,86 @@
+name: AgentOS Production CI
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - main
+      - master
+      - 'feature/**'
+      - 'fix/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+  FORCE_COLOR: 1
+
+jobs:
+  quality-and-test:
+    name: Typecheck, Unit Tests & Build (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20.x, 22.x]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Cache Node Modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ matrix.node-version }}-${{ hashFiles('package.json', 'package-lock.json', 'bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ matrix.node-version }}-
+
+      - name: Install Dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --prefer-offline --no-audit
+          else
+            npm install --prefer-offline --no-audit
+          fi
+
+      - name: TypeScript Strict Validation (Typecheck)
+        run: npm run lint
+
+      - name: Execute Unit Test Suite (Engine, VCS, Sandbox, D3 & Export)
+        run: npm test
+
+      - name: Build Production Bundle
+        env:
+          NODE_ENV: production
+        run: npm run build
+
+      - name: Verify Build Output Integrity
+        run: |
+          test -d dist
+          test -f dist/index.html
+          echo "Production bundle verified successfully:"
+          ls -lh dist/ dist/assets/
+
+      - name: Upload Production Artifact
+        if: matrix.node-version == '22.x' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentos-production-dist
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
