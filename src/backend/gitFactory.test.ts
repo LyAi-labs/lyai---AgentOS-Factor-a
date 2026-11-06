@@ -1,5 +1,5 @@
 /**
- * Pruebas automáticas reales del backend GitFactory (11 Puntos REALES en Linux + Git)
+ * Pruebas automáticas reales del backend GitFactory (11 Puntos REALES + Server-Side Git Hooks GPG/#TASK-<id>)
  * Regla 4: Pruebas automáticas que NO llaman a ningún modelo externo.
  */
 
@@ -10,7 +10,7 @@ import os from 'os';
 import path from 'path';
 import { GitFactoryBackend, ELEVEN_POINTS_AUDIT } from './gitFactory';
 
-describe('Backend Real GitFactory — 11 Puntos Reales en Linux y Git (Sin llamadas a modelos)', () => {
+describe('Backend Real GitFactory — 11 Puntos Reales + Server-Side Hooks (pre-receive, update) con GPG y #TASK-<id>', () => {
   let tempRepoDir: string;
   let backend: GitFactoryBackend;
 
@@ -29,13 +29,17 @@ describe('Backend Real GitFactory — 11 Puntos Reales en Linux y Git (Sin llama
     }
   });
 
-  it('Inicializa un repositorio Git real en la rama main con reglas Brain y árbol limpio', () => {
+  it('Inicializa un repositorio Git real en main con firma GPG, reglas Brain y server-side hooks (pre-receive, update)', () => {
     const status = backend.getRepoStatus();
     assert.equal(status.currentBranch, 'main');
     assert.equal(status.isClean, true);
     assert.equal(status.uncommittedFiles.length, 0);
     assert.ok(fs.existsSync(path.join(tempRepoDir, '.git')));
     assert.ok(fs.existsSync(path.join(tempRepoDir, 'brain', 'wiki-rules.md')));
+    assert.equal(status.serverHooks.installed, true);
+    assert.ok(status.serverHooks.gpgKeyFingerprint.length >= 16);
+    assert.equal(status.recentCommits[0]?.gpgStatus, 'G');
+    assert.equal(status.recentCommits[0]?.taskIdRef, '#TASK-INIT');
   });
 
   it('Puntos 1 y 2: Ingesta, analiza alcance real en disco y persiste especificación coherente', () => {
@@ -63,7 +67,7 @@ describe('Backend Real GitFactory — 11 Puntos Reales en Linux y Git (Sin llama
     assert.equal(updated.spec.specFilePath, 'specs/ENCARGO-01.md');
   });
 
-  it('Puntos 3, 4, 5, 6 y 10: Construye en rama aislada Git, ejecuta subproceso Verificador sobre BD aislada, firma con Ed25519 y aprueba 4/4', () => {
+  it('Puntos 3, 4, 5, 6 y 10: Construye en rama aislada con GPG y #TASK-<id>, ejecuta Verificador sobre BD aislada y aprueba 4/4', () => {
     backend.createTask({
       id: 'ENCARGO-02',
       title: 'Módulo de auditoría Git',
@@ -77,6 +81,8 @@ describe('Backend Real GitFactory — 11 Puntos Reales en Linux y Git (Sin llama
     assert.equal(builtTask.stage, 'construido_en_rama');
     assert.ok(builtTask.build);
     assert.equal(builtTask.build.branchName, 'task/ENCARGO-02');
+    assert.equal(builtTask.build.gpgSigned, true);
+    assert.ok(builtTask.build.commitMessage.includes('#TASK-ENCARGO-02'));
     assert.ok(builtTask.build.gitDiff.includes('diff --git'));
 
     // Punto 10: Seguridad
@@ -93,13 +99,13 @@ describe('Backend Real GitFactory — 11 Puntos Reales en Linux y Git (Sin llama
     assert.equal(builtTask.verifier.subprocessExitCode, 0);
     assert.ok(builtTask.verifier.stdout.includes('VERIFICADOR_OK'));
 
-    // Punto 6: Approver 4/4 con firma criptográfica Ed25519 real
+    // Punto 6: Approver 4/4 con firma criptográfica Ed25519 + GPG real
     assert.ok(builtTask.approver);
     assert.equal(builtTask.approver.votesPassed, 4);
     assert.equal(builtTask.approver.approved, true);
   });
 
-  it('Puntos 7, 8, 9 y 11: Se NIEGA a fusionar si hay cambios sin confirmar y cuando está limpio fusiona en main, crea checkpoint tag y hace git push real a origin', () => {
+  it('Puntos 7, 8, 9 y 11: Se NIEGA a fusionar si hay cambios sin confirmar y cuando está limpio fusiona en main con firma GPG y hace git push real a origin', () => {
     backend.createTask({
       id: 'ENCARGO-03',
       title: 'Cierre protegido en main',
@@ -134,6 +140,31 @@ describe('Backend Real GitFactory — 11 Puntos Reales en Linux y Git (Sin llama
     assert.equal(finalStatus.currentBranch, 'main');
     assert.equal(finalStatus.remoteOriginHeadHash, mergeResult.mergeCommitHash);
     assert.ok(finalStatus.tags.includes('checkpoint-pre-ENCARGO-03'));
+  });
+
+  it('Server-Side Git Hooks (pre-receive y update): Impiden el push sin firma GPG válida o sin #TASK-<id> y aceptan commits conformes', () => {
+    // 1. Intento de push sin #TASK-<id> en el mensaje de commit -> RECHAZADO
+    const noTaskIdResult = backend.verifyServerSideHooksCompliance('missing_task_id');
+    assert.equal(noTaskIdResult.pushAccepted, false);
+    assert.equal(noTaskIdResult.passedComplianceCheck, true);
+    assert.ok(
+      noTaskIdResult.hookOutput.includes('SERVER-HOOK pre-receive RECHAZADO') &&
+        noTaskIdResult.hookOutput.includes('#TASK-<id>')
+    );
+
+    // 2. Intento de push sin firma GPG válida (--no-gpg-sign) -> RECHAZADO
+    const unsignedResult = backend.verifyServerSideHooksCompliance('unsigned_gpg');
+    assert.equal(unsignedResult.pushAccepted, false);
+    assert.equal(unsignedResult.passedComplianceCheck, true);
+    assert.ok(
+      unsignedResult.hookOutput.includes('SERVER-HOOK pre-receive RECHAZADO') &&
+        unsignedResult.hookOutput.includes('firma GPG válida')
+    );
+
+    // 3. Push con firma GPG válida (-S) y #TASK-<id> -> ACEPTADO
+    const validResult = backend.verifyServerSideHooksCompliance('valid_signed_with_task');
+    assert.equal(validResult.pushAccepted, true);
+    assert.equal(validResult.passedComplianceCheck, true);
   });
 
   it('Los 11 puntos del encargo están implementados como REALES en el backend', () => {

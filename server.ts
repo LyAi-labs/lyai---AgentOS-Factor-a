@@ -17,7 +17,7 @@ import { INITIAL_NODES, INITIAL_EDGES } from './src/pipeline/graphData';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const isProduction = process.env.NODE_ENV === 'production';
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = 3000;
 
 const gitFactory = new GitFactoryBackend();
 
@@ -267,6 +267,43 @@ app.post('/api/factory/git/clean', (_req, res) => {
     });
   }
 });
+
+app.get('/api/factory/git/hooks', (_req, res) => {
+  try {
+    res.json({
+      hooks: gitFactory.getServerHooksStatus(),
+      repo: gitFactory.getRepoStatus(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Error al leer el estado de los server-side hooks',
+    });
+  }
+});
+
+app.post('/api/factory/git/hooks/verify', (req, res) => {
+  try {
+    const { scenario } = req.body || {};
+    const validScenarios = ['missing_task_id', 'unsigned_gpg', 'valid_signed_with_task'] as const;
+    const chosenScenario = validScenarios.includes(scenario)
+      ? scenario
+      : 'missing_task_id';
+    const result = gitFactory.verifyServerSideHooksCompliance(chosenScenario);
+    const repo = gitFactory.getRepoStatus();
+    res.json({
+      result,
+      repo,
+    });
+  } catch (error) {
+    res.status(400).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Error al verificar los server-side git hooks (pre-receive, update)',
+    });
+  }
+});
+
 
 async function startServer() {
   if (!isProduction) {

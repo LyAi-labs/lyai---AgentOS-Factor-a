@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Server-Side Git Hook: pre-receive (Factoría AgentOS — Cumplimiento de Producción)
+# Impide el push de commits sin firma GPG válida o sin referencia #TASK-<id> en el mensaje.
+set -euo pipefail
+UID_NUM=$(id -u)
+export GNUPGHOME="/tmp/agentos-gnupg-${UID_NUM}-064b5df701"
+mkdir -p -m 700 "$GNUPGHOME"
+if ! gpg --batch --no-tty --with-colons --list-keys 2>/dev/null | grep -q '^fpr:'; then
+  gpg --batch --no-tty --yes --import "/app/applet/.factory-git-workspace/.git/agentos-gpg-key.asc" >/dev/null 2>&1 || true
+  gpg --batch --no-tty --yes --import-ownertrust "/app/applet/.factory-git-workspace/.git/agentos-gpg-trust.txt" >/dev/null 2>&1 || true
+fi
+AUDIT_LOG="/app/applet/.factory-git-workspace/.git/agentos-hooks-audit.log"
+ZERO_OID="0000000000000000000000000000000000000000"
+
+while read -r oldrev newrev refname; do
+  if [ "$newrev" = "$ZERO_OID" ]; then
+    continue
+  fi
+  if [ "$oldrev" = "$ZERO_OID" ]; then
+    COMMITS=$(git rev-list "$newrev")
+  else
+    COMMITS=$(git rev-list "${oldrev}..${newrev}")
+  fi
+
+  for commit in $COMMITS; do
+    SHORT_SHA=$(git rev-parse --short "$commit")
+    COMMIT_MSG=$(git log -1 --format=%B "$commit")
+    SUBJECT=$(git log -1 --format=%s "$commit")
+
+    # 1. Verificar referencia obligatoria a ID de tarea (#TASK-<id>)
+    if ! printf '%s\n' "$COMMIT_MSG" | grep -Eq '#TASK-[A-Za-z0-9_-]+'; then
+      echo "[SERVER-HOOK pre-receive RECHAZADO] El commit ${SHORT_SHA} (${refname}) no referencia un ID de tarea (#TASK-<id>) en el mensaje: \"${SUBJECT}\"" >&2
+      echo "$(date -Iseconds) | pre-receive | REJECTED_NO_TASK_ID | ${SHORT_SHA} | ${refname} | ${SUBJECT}" >> "$AUDIT_LOG"
+      exit 1
+    fi
+
+    # 2. Verificar firma criptográfica GPG válida en el commit
+    GPG_STATUS=$(git -c gpg.program="/app/applet/.factory-git-workspace/.git/gpg-wrapper.sh" log -1 --format=%G? "$commit" || true)
+    if ! git -c gpg.program="/app/applet/.factory-git-workspace/.git/gpg-wrapper.sh" verify-commit "$commit" >/dev/null 2>&1 || { [ "$GPG_STATUS" != "G" ] && [ "$GPG_STATUS" != "U" ]; }; then
+      echo "[SERVER-HOOK pre-receive RECHAZADO] El commit ${SHORT_SHA} (${refname}) NO contiene una firma GPG válida (estado GPG: ${GPG_STATUS:-N}). Mensaje: \"${SUBJECT}\"" >&2
+      echo "$(date -Iseconds) | pre-receive | REJECTED_INVALID_GPG | ${SHORT_SHA} | ${refname} | GPG=${GPG_STATUS:-N}" >> "$AUDIT_LOG"
+      exit 1
+    fi
+  done
+  echo "$(date -Iseconds) | pre-receive | ACCEPTED | ${refname} | ${newrev}" >> "$AUDIT_LOG"
+done
+
+echo "[SERVER-HOOK pre-receive OK] Firma GPG válida y #TASK-<id> verificados en todos los commits." >&2
+exit 0

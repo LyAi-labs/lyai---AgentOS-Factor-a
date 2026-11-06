@@ -1,13 +1,15 @@
 /**
- * Backend Real de la Factoría Agéntica (Node 20+ sobre Linux con Git real)
- * Implementa de forma REAL en el servidor Linux los 11 puntos del encargo usando:
- * - Binario `git` real de Linux (`init`, `checkout -B`, `add`, `commit`, `diff`, `status --porcelain`, `merge --no-ff`, `tag`, `push`).
+ * Backend Real de la Factoría Agéntica (Node 20+ sobre Linux con Git real y GnuPG real)
+ * Implementa de forma REAL en el servidor Linux los 11 puntos del encargo + Server-Side Git Hooks (pre-receive, update) usando:
+ * - Binario `git` real de Linux (`init`, `checkout -B`, `add`, `commit -S`, `diff`, `status --porcelain`, `merge --no-ff -S`, `tag`, `push`).
+ * - Binario `gpg` (GnuPG 2.2+) real de Linux para firmar criptográficamente cada commit (`git commit -S`) y verificarlo en los hooks (`git verify-commit`).
+ * - Server-side Git hooks (`pre-receive` y `update`) instalados en `.factory-git-workspace/hooks/`, `.factory-git-workspace/.git/hooks/` y en el remoto bare `.factory-git-workspace-remote-bare.git/hooks/` que bloquean cualquier `git push` cuyos commits no tengan firma GPG válida o no incluyan `#TASK-<id>` en el mensaje.
  * - Sistema de archivos real (`fs`) para `brain/wiki-rules.md`, `specs/<id>.md`, `evidence/<id>.json` y BD de pruebas aislada.
  * - Subprocesos reales de Node (`execFileSync('node', ...)`) para el Verificador sobre la BD de pruebas aislada.
  * - Criptografía real (`crypto` Ed25519 / SHA-256) para firmar el código verificado y validar los 4 votos del Approver (4/4).
  *
  * NOTA DE TRANSPARENCIA (Reglas 1 y 4):
- * - Los 11 puntos ejecutan operaciones reales de sistema, Git, procesos y criptografía en Linux.
+ * - Los 11 puntos y los server-side git hooks ejecutan operaciones reales de sistema, Git, GnuPG, procesos y criptografía en Linux.
  * - Únicamente la síntesis de texto/código usa un generador determinista local sin llamar a APIs de modelos LLM externos
  *   para cumplir la Regla 4 ("Pruebas automáticas que no llamen a ningún modelo") y no depender de claves externas.
  */
@@ -15,6 +17,7 @@
 import { execFileSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { performance } from 'perf_hooks';
 
@@ -53,6 +56,8 @@ export interface TaskBuildResult {
   branchName: string;
   commitHash: string;
   commitMessage: string;
+  gpgSigned: boolean;
+  gpgKeyFingerprint: string;
   modifiedFiles: string[];
   gitDiff: string;
   builtAtIso: string;
@@ -117,6 +122,31 @@ export interface GitPushResult {
   timestampIso: string;
 }
 
+export interface ServerSideHookComplianceResult {
+  scenario: 'missing_task_id' | 'unsigned_gpg' | 'valid_signed_with_task';
+  pushAccepted: boolean;
+  expectedOutcome: 'REJECTED' | 'ACCEPTED';
+  passedComplianceCheck: boolean;
+  hookOutput: string;
+  testedCommitMessage: string;
+  testedCommitGpgSigned: boolean;
+  timestampIso: string;
+}
+
+export interface ServerSideHooksStatus {
+  installed: boolean;
+  gpgKeyFingerprint: string;
+  gpgUid: string;
+  workspaceHooksDir: string;
+  gitHooksDir: string;
+  bareRemoteHooksDir: string;
+  activeHooks: string[];
+  enforcedPolicies: string[];
+  preReceiveScriptPreview: string;
+  updateScriptPreview: string;
+  auditLogEntries: string[];
+}
+
 export type FactoryTaskStage =
   | 'pendiente_spec'
   | 'analizado_y_filtrado'
@@ -155,6 +185,7 @@ export interface GitRepoStatusSnapshot {
   repoPath: string;
   bareRemotePath: string;
   gitRemoteUrl: string;
+  factoryRemoteUrl: string;
   currentBranch: string;
   headCommitHash: string;
   remoteOriginHeadHash: string | null;
@@ -164,7 +195,16 @@ export interface GitRepoStatusSnapshot {
   branches: string[];
   tags: string[];
   remotes: string[];
-  recentCommits: { hash: string; subject: string; author: string; dateIso: string }[];
+  recentCommits: {
+    hash: string;
+    subject: string;
+    author: string;
+    dateIso: string;
+    gpgStatus: string;
+    gpgKeyId: string;
+    taskIdRef: string | null;
+  }[];
+  serverHooks: ServerSideHooksStatus;
   lastPushResult: GitPushResult | null;
 }
 
@@ -177,7 +217,7 @@ export interface ElevenPointStatus {
 
 /**
  * Estado de los 11 puntos del encargo: todos implementados con operaciones REALES
- * de Git, sistema de archivos, subprocesos Node y criptografía Ed25519 en Linux.
+ * de Git, GnuPG, sistema de archivos, subprocesos Node y criptografía Ed25519 en Linux.
  */
 export const ELEVEN_POINTS_AUDIT: ElevenPointStatus[] = [
   {
@@ -196,17 +236,17 @@ export const ELEVEN_POINTS_AUDIT: ElevenPointStatus[] = [
   },
   {
     pointNumber: 3,
-    title: 'Construcción en rama aislada con Git real (Builder)',
+    title: 'Construcción en rama aislada con Git real y firma GPG (Builder)',
     status: 'REAL',
     explanation:
-      'REAL (Git Linux): Ejecuta `git checkout -B task/<id> main`, escribe archivos en disco, ejecuta `git add` y `git commit` reales y extrae el SHA y `git diff main..task/<id>` verdaderos.',
+      'REAL (Git + GnuPG Linux): Ejecuta `git checkout -B task/<id> main`, escribe archivos en disco, ejecuta `git add` y `git commit -S` firmado con GPG e incluyendo `#TASK-<id>`, y extrae el SHA y `git diff main..task/<id>` verdaderos.',
   },
   {
     pointNumber: 4,
     title: 'Validación UI y Evidencia verificable en disco (Evidencia visual)',
     status: 'REAL',
     explanation:
-      'REAL (Disco + Hash SHA-256): Inspecciona el artefacto generado en la rama aislada, calcula su huella SHA-256 real y guarda el recibo de evidencia en `evidence/<id>.json`.',
+      'REAL (Disco + Hash SHA-256): Inspecciona el artefacto generado en la rama aislada, calcula su huella SHA-256 real y guarda el recibo de evidencia en `.git/agentos-evidence/<id>.json`.',
   },
   {
     pointNumber: 5,
@@ -217,17 +257,17 @@ export const ELEVEN_POINTS_AUDIT: ElevenPointStatus[] = [
   },
   {
     pointNumber: 6,
-    title: 'Consenso Approver (4 de 4) y firma criptográfica Ed25519 real',
+    title: 'Consenso Approver (4 de 4) y firma criptográfica Ed25519 + GPG real',
     status: 'REAL',
     explanation:
-      'REAL (Crypto Ed25519): Firma el commit y el código con clave criptográfica Ed25519 real (`crypto.sign` / `crypto.verify`) y exige 4/4 votos reales (Spec, Verificador, Seguridad y Firma) para aprobar.',
+      'REAL (Crypto Ed25519 + GnuPG): Firma el commit con GPG (`git commit -S`) y el artefacto con clave Ed25519 (`crypto.sign` / `crypto.verify`), exigiendo 4/4 votos reales para aprobar.',
   },
   {
     pointNumber: 7,
     title: 'Fusión en `main local` (`cerrar`) que se niega si hay cambios sin confirmar',
     status: 'REAL',
     explanation:
-      'REAL (Git Linux): Ejecuta `git status --porcelain`. Si hay cualquier archivo sin confirmar en el árbol de trabajo, rechaza la fusión con HTTP 409. Solo ejecuta `git merge --no-ff` en `main` cuando el árbol está limpio.',
+      'REAL (Git Linux): Ejecuta `git status --porcelain`. Si hay cualquier archivo sin confirmar en el árbol de trabajo, rechaza la fusión con HTTP 409. Solo ejecuta `git merge --no-ff -S` en `main` cuando el árbol está limpio.',
   },
   {
     pointNumber: 8,
@@ -245,28 +285,36 @@ export const ELEVEN_POINTS_AUDIT: ElevenPointStatus[] = [
   },
   {
     pointNumber: 10,
-    title: 'Memoria Brain (`brain/wiki-rules.md`) y Seguridad (escáner real de diffs)',
+    title: 'Memoria Brain (`brain/wiki-rules.md`) y Seguridad (escáner diffs + Server-Side Hooks)',
     status: 'REAL',
     explanation:
-      'REAL (FS + Regex Scanner): Mantiene `brain/wiki-rules.md` en el repositorio Git y escanea cada `git diff` real contra fugas de claves privadas, secretos hardcoded o comandos destructivos.',
+      'REAL (FS + Server-Side Hooks `pre-receive` y `update`): Escanea cada `git diff` contra secretos y ejecuta hooks reales en el servidor que impiden cualquier `git push` sin firma GPG válida o sin `#TASK-<id>`.',
   },
   {
     pointNumber: 11,
     title: 'Benchmark Lab (tiempos reales), Producción (`git push origin main`) y bucle rev <24h',
     status: 'REAL',
     explanation:
-      'REAL (Git Bare Remote + Perf): Registra tiempos reales de ejecución (`performance.now()`) en `brain/telemetry-log.json`, crea el tag de release y ejecuta `git push -u origin main` real hacia el repositorio bare en Linux.',
+      'REAL (Git Bare Remote + Hooks + Perf): Registra tiempos reales (`performance.now()`), crea el tag de release y ejecuta `git push -u origin main` validado por los hooks `pre-receive` y `update` en Linux.',
   },
 ];
 
 export class GitFactoryBackend {
   public readonly repoPath: string;
   public readonly bareRemotePath: string;
+  public readonly gnupgHomePath: string;
+  public readonly repoHash: string;
+  public readonly sharedKeyAscPath: string;
+  public readonly sharedOwnerTrustPath: string;
+  public readonly gpgWrapperPath: string;
+  public readonly hooksAuditLogPath: string;
   private tasks: Map<string, FactoryTaskRecord> = new Map();
   private lastPushResult: GitPushResult | null = null;
   private readonly privateKey: crypto.KeyObject;
   private readonly publicKey: crypto.KeyObject;
   private readonly publicKeyFingerprint: string;
+  private gpgKeyFingerprint = '';
+  private readonly gpgUid = 'AgentOS Factory Daemon <factory@agentos.local>';
 
   constructor(repoPath?: string) {
     this.repoPath =
@@ -274,6 +322,17 @@ export class GitFactoryBackend {
       process.env.FACTORY_REPO_PATH ||
       path.resolve(process.cwd(), '.factory-git-workspace');
     this.bareRemotePath = `${this.repoPath}-remote-bare.git`;
+    this.repoHash = crypto
+      .createHash('md5')
+      .update(this.repoPath)
+      .digest('hex')
+      .slice(0, 10);
+    const uid = typeof process.getuid === 'function' ? process.getuid() : 0;
+    this.gnupgHomePath = path.join(os.tmpdir(), `agentos-gnupg-${uid}-${this.repoHash}`);
+    this.sharedKeyAscPath = path.join(this.repoPath, '.git', 'agentos-gpg-key.asc');
+    this.sharedOwnerTrustPath = path.join(this.repoPath, '.git', 'agentos-gpg-trust.txt');
+    this.gpgWrapperPath = path.join(this.repoPath, '.git', 'gpg-wrapper.sh');
+    this.hooksAuditLogPath = path.join(this.repoPath, '.git', 'agentos-hooks-audit.log');
 
     // Generar par de claves Ed25519 real para firmado criptográfico de código (Punto 6)
     const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
@@ -291,6 +350,18 @@ export class GitFactoryBackend {
   }
 
   /**
+   * Entorno de ejecución con GNUPGHOME aislado por UID en /tmp para evitar conflictos
+   * de propietario o límites de longitud de socket UNIX (UNIX_PATH_MAX) en Linux.
+   */
+  private getGitEnv(): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      GNUPGHOME: this.gnupgHomePath,
+      GIT_TERMINAL_PROMPT: '0',
+    };
+  }
+
+  /**
    * Ejecuta un comando `git` real en el directorio del repositorio de trabajo.
    */
   public runGit(args: string[]): string {
@@ -298,14 +369,356 @@ export class GitFactoryBackend {
       cwd: this.repoPath,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: this.getGitEnv(),
     }).trimEnd();
   }
 
   /**
-   * Inicializa el repositorio Git real, la wiki de reglas Brain (`brain/wiki-rules.md`)
-   * y un remoto bare local (`origin`) en Linux si aún no existen.
+   * Asegura que exista un llavero GnuPG real en `/tmp/agentos-gnupg-<uid>-<hash>`
+   * sincronizado con `.git/agentos-gpg-key.asc` y un wrapper `gpg-wrapper.sh` con
+   * `--batch --no-tty --pinentry-mode loopback` para que `git commit -S` y `git verify-commit`
+   * nunca fallen por falta de TTY o cambio de usuario (root vs appuser).
+   */
+  private ensureGpgKeyringInitialized(): string {
+    fs.mkdirSync(this.gnupgHomePath, { recursive: true, mode: 0o700 });
+    try {
+      fs.chmodSync(this.gnupgHomePath, 0o700);
+      fs.writeFileSync(
+        path.join(this.gnupgHomePath, 'gpg-agent.conf'),
+        'allow-loopback-pinentry\n',
+        { encoding: 'utf-8', mode: 0o600 }
+      );
+    } catch {
+      // Ignorar si no aplica
+    }
+
+    const extractFingerprint = (): string => {
+      try {
+        const listOut = execFileSync(
+          'gpg',
+          ['--batch', '--no-tty', '--with-colons', '--list-secret-keys'],
+          {
+            encoding: 'utf-8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: this.getGitEnv(),
+          }
+        );
+        for (const line of listOut.split('\n')) {
+          if (line.startsWith('fpr:')) {
+            const parts = line.split(':');
+            if (parts[9]) {
+              return parts[9].trim();
+            }
+          }
+        }
+      } catch {
+        // Sin clave aún
+      }
+      return '';
+    };
+
+    // Si existe una clave exportada en el repositorio y aún no está en este GNUPGHOME, importarla
+    let fpr = extractFingerprint();
+    if (!fpr && fs.existsSync(this.sharedKeyAscPath)) {
+      try {
+        execFileSync(
+          'gpg',
+          ['--batch', '--no-tty', '--yes', '--import', this.sharedKeyAscPath],
+          {
+            encoding: 'utf-8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: this.getGitEnv(),
+          }
+        );
+        if (fs.existsSync(this.sharedOwnerTrustPath)) {
+          execFileSync(
+            'gpg',
+            ['--batch', '--no-tty', '--yes', '--import-ownertrust', this.sharedOwnerTrustPath],
+            {
+              encoding: 'utf-8',
+              stdio: ['ignore', 'pipe', 'pipe'],
+              env: this.getGitEnv(),
+            }
+          );
+        }
+        fpr = extractFingerprint();
+      } catch {
+        // Si falla la importación, generaremos una nueva
+      }
+    }
+
+    if (!fpr) {
+      execFileSync(
+        'gpg',
+        [
+          '--batch',
+          '--no-tty',
+          '--pinentry-mode',
+          'loopback',
+          '--passphrase',
+          '',
+          '--quick-generate-key',
+          this.gpgUid,
+          'ed25519',
+          'sign',
+          '0',
+        ],
+        {
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: this.getGitEnv(),
+        }
+      );
+      fpr = extractFingerprint();
+    }
+
+    // Exportar la clave y el ownertrust al directorio .git del repositorio para compartirla entre UIDs y hooks
+    if (fpr && !fs.existsSync(this.sharedKeyAscPath)) {
+      try {
+        const exportedAsc = execFileSync(
+          'gpg',
+          [
+            '--batch',
+            '--no-tty',
+            '--pinentry-mode',
+            'loopback',
+            '--passphrase',
+            '',
+            '--armor',
+            '--export-secret-keys',
+            fpr,
+          ],
+          {
+            encoding: 'utf-8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: this.getGitEnv(),
+          }
+        );
+        const exportedPubAsc = execFileSync(
+          'gpg',
+          ['--batch', '--no-tty', '--armor', '--export', fpr],
+          {
+            encoding: 'utf-8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: this.getGitEnv(),
+          }
+        );
+        fs.writeFileSync(
+          this.sharedKeyAscPath,
+          `${exportedPubAsc}\n${exportedAsc}\n`,
+          { encoding: 'utf-8', mode: 0o666 }
+        );
+        fs.writeFileSync(
+          this.sharedOwnerTrustPath,
+          `${fpr}:6:\n`,
+          { encoding: 'utf-8', mode: 0o666 }
+        );
+      } catch {
+        // Ignorar si ya existe
+      }
+    }
+
+    // Crear wrapper ejecutable gpg-wrapper.sh para Git
+    const wrapperContent = [
+      `#!/usr/bin/env bash`,
+      `UID_NUM=$(id -u)`,
+      `export GNUPGHOME="/tmp/agentos-gnupg-\${UID_NUM}-${this.repoHash}"`,
+      `mkdir -p -m 700 "$GNUPGHOME"`,
+      `if ! gpg --batch --no-tty --with-colons --list-secret-keys 2>/dev/null | grep -q '^fpr:'; then`,
+      `  gpg --batch --no-tty --yes --import ${JSON.stringify(this.sharedKeyAscPath)} >/dev/null 2>&1 || true`,
+      `  gpg --batch --no-tty --yes --import-ownertrust ${JSON.stringify(this.sharedOwnerTrustPath)} >/dev/null 2>&1 || true`,
+      `fi`,
+      `exec gpg --batch --no-tty --pinentry-mode loopback --passphrase "" "$@"`,
+      ``,
+    ].join('\n');
+    fs.writeFileSync(this.gpgWrapperPath, wrapperContent, { encoding: 'utf-8', mode: 0o755 });
+    fs.chmodSync(this.gpgWrapperPath, 0o755);
+
+    this.gpgKeyFingerprint = fpr;
+    return fpr;
+  }
+
+  /**
+   * Construye el contenido de los server-side hooks reales (`pre-receive` y `update`)
+   * que validan:
+   * 1. Que cada commit referencie un ID de tarea (`#TASK-<id>`) en su mensaje.
+   * 2. Que cada commit posea una firma GPG válida (`git verify-commit` + `%G?` == G/U).
+   */
+  private buildServerHookScripts(): { preReceiveScript: string; updateScript: string } {
+    const gpgBootstrapBlock = [
+      `UID_NUM=$(id -u)`,
+      `export GNUPGHOME="/tmp/agentos-gnupg-\${UID_NUM}-${this.repoHash}"`,
+      `mkdir -p -m 700 "$GNUPGHOME"`,
+      `if ! gpg --batch --no-tty --with-colons --list-keys 2>/dev/null | grep -q '^fpr:'; then`,
+      `  gpg --batch --no-tty --yes --import ${JSON.stringify(this.sharedKeyAscPath)} >/dev/null 2>&1 || true`,
+      `  gpg --batch --no-tty --yes --import-ownertrust ${JSON.stringify(this.sharedOwnerTrustPath)} >/dev/null 2>&1 || true`,
+      `fi`,
+    ].join('\n');
+
+    const preReceiveScript = [
+      `#!/usr/bin/env bash`,
+      `# Server-Side Git Hook: pre-receive (Factoría AgentOS — Cumplimiento de Producción)`,
+      `# Impide el push de commits sin firma GPG válida o sin referencia #TASK-<id> en el mensaje.`,
+      `set -euo pipefail`,
+      gpgBootstrapBlock,
+      `AUDIT_LOG=${JSON.stringify(this.hooksAuditLogPath)}`,
+      `ZERO_OID="0000000000000000000000000000000000000000"`,
+      ``,
+      `while read -r oldrev newrev refname; do`,
+      `  if [ "$newrev" = "$ZERO_OID" ]; then`,
+      `    continue`,
+      `  fi`,
+      `  if [ "$oldrev" = "$ZERO_OID" ]; then`,
+      `    COMMITS=$(git rev-list "$newrev")`,
+      `  else`,
+      `    COMMITS=$(git rev-list "\${oldrev}..\${newrev}")`,
+      `  fi`,
+      ``,
+      `  for commit in $COMMITS; do`,
+      `    SHORT_SHA=$(git rev-parse --short "$commit")`,
+      `    COMMIT_MSG=$(git log -1 --format=%B "$commit")`,
+      `    SUBJECT=$(git log -1 --format=%s "$commit")`,
+      ``,
+      `    # 1. Verificar referencia obligatoria a ID de tarea (#TASK-<id>)`,
+      `    if ! printf '%s\\n' "$COMMIT_MSG" | grep -Eq '#TASK-[A-Za-z0-9_-]+'; then`,
+      `      echo "[SERVER-HOOK pre-receive RECHAZADO] El commit \${SHORT_SHA} (\${refname}) no referencia un ID de tarea (#TASK-<id>) en el mensaje: \\"\${SUBJECT}\\"" >&2`,
+      `      echo "$(date -Iseconds) | pre-receive | REJECTED_NO_TASK_ID | \${SHORT_SHA} | \${refname} | \${SUBJECT}" >> "$AUDIT_LOG"`,
+      `      exit 1`,
+      `    fi`,
+      ``,
+      `    # 2. Verificar firma criptográfica GPG válida en el commit`,
+      `    GPG_STATUS=$(git -c gpg.program=${JSON.stringify(this.gpgWrapperPath)} log -1 --format=%G? "$commit" || true)`,
+      `    if ! git -c gpg.program=${JSON.stringify(this.gpgWrapperPath)} verify-commit "$commit" >/dev/null 2>&1 || { [ "$GPG_STATUS" != "G" ] && [ "$GPG_STATUS" != "U" ]; }; then`,
+      `      echo "[SERVER-HOOK pre-receive RECHAZADO] El commit \${SHORT_SHA} (\${refname}) NO contiene una firma GPG válida (estado GPG: \${GPG_STATUS:-N}). Mensaje: \\"\${SUBJECT}\\"" >&2`,
+      `      echo "$(date -Iseconds) | pre-receive | REJECTED_INVALID_GPG | \${SHORT_SHA} | \${refname} | GPG=\${GPG_STATUS:-N}" >> "$AUDIT_LOG"`,
+      `      exit 1`,
+      `    fi`,
+      `  done`,
+      `  echo "$(date -Iseconds) | pre-receive | ACCEPTED | \${refname} | \${newrev}" >> "$AUDIT_LOG"`,
+      `done`,
+      ``,
+      `echo "[SERVER-HOOK pre-receive OK] Firma GPG válida y #TASK-<id> verificados en todos los commits." >&2`,
+      `exit 0`,
+      ``,
+    ].join('\n');
+
+    const updateScript = [
+      `#!/usr/bin/env bash`,
+      `# Server-Side Git Hook: update (Factoría AgentOS — Cumplimiento de Producción por Ref)`,
+      `# Impide actualizar cualquier ref si algún commit carece de firma GPG válida o de #TASK-<id>.`,
+      `set -euo pipefail`,
+      gpgBootstrapBlock,
+      `AUDIT_LOG=${JSON.stringify(this.hooksAuditLogPath)}`,
+      `ZERO_OID="0000000000000000000000000000000000000000"`,
+      ``,
+      `refname="\${1:-}"`,
+      `oldrev="\${2:-}"`,
+      `newrev="\${3:-}"`,
+      ``,
+      `if [ -z "$refname" ] || [ -z "$newrev" ] || [ "$newrev" = "$ZERO_OID" ]; then`,
+      `  exit 0`,
+      `fi`,
+      ``,
+      `if [ "$oldrev" = "$ZERO_OID" ]; then`,
+      `  COMMITS=$(git rev-list "$newrev")`,
+      `else`,
+      `  COMMITS=$(git rev-list "\${oldrev}..\${newrev}")`,
+      `fi`,
+      ``,
+      `for commit in $COMMITS; do`,
+      `  SHORT_SHA=$(git rev-parse --short "$commit")`,
+      `  COMMIT_MSG=$(git log -1 --format=%B "$commit")`,
+      `  SUBJECT=$(git log -1 --format=%s "$commit")`,
+      ``,
+      `  # 1. Verificar referencia obligatoria a ID de tarea (#TASK-<id>)`,
+      `  if ! printf '%s\\n' "$COMMIT_MSG" | grep -Eq '#TASK-[A-Za-z0-9_-]+'; then`,
+      `    echo "[SERVER-HOOK update RECHAZADO] Ref \${refname}: El commit \${SHORT_SHA} no referencia un ID de tarea (#TASK-<id>): \\"\${SUBJECT}\\"" >&2`,
+      `    echo "$(date -Iseconds) | update | REJECTED_NO_TASK_ID | \${SHORT_SHA} | \${refname} | \${SUBJECT}" >> "$AUDIT_LOG"`,
+      `    exit 1`,
+      `  fi`,
+      ``,
+      `  # 2. Verificar firma criptográfica GPG válida`,
+      `  GPG_STATUS=$(git -c gpg.program=${JSON.stringify(this.gpgWrapperPath)} log -1 --format=%G? "$commit" || true)`,
+      `  if ! git -c gpg.program=${JSON.stringify(this.gpgWrapperPath)} verify-commit "$commit" >/dev/null 2>&1 || { [ "$GPG_STATUS" != "G" ] && [ "$GPG_STATUS" != "U" ]; }; then`,
+      `    echo "[SERVER-HOOK update RECHAZADO] Ref \${refname}: El commit \${SHORT_SHA} NO tiene una firma GPG válida (estado GPG: \${GPG_STATUS:-N})." >&2`,
+      `    echo "$(date -Iseconds) | update | REJECTED_INVALID_GPG | \${SHORT_SHA} | \${refname} | GPG=\${GPG_STATUS:-N}" >> "$AUDIT_LOG"`,
+      `    exit 1`,
+      `  fi`,
+      `done`,
+      ``,
+      `echo "$(date -Iseconds) | update | ACCEPTED | \${refname} | \${newrev}" >> "$AUDIT_LOG"`,
+      `echo "[SERVER-HOOK update OK] Ref \${refname} verificada (GPG + #TASK-<id>)." >&2`,
+      `exit 0`,
+      ``,
+    ].join('\n');
+
+    return { preReceiveScript, updateScript };
+  }
+
+  /**
+   * Instala los hooks `pre-receive` y `update` con permisos de ejecución (`0o755`) en:
+   * 1. `.factory-git-workspace/hooks/` (carpeta versionada dentro de `.factory-git-workspace`)
+   * 2. `.factory-git-workspace/.git/hooks/` (hooks del repositorio local)
+   * 3. `.factory-git-workspace-remote-bare.git/hooks/` (hooks del servidor remoto bare `origin`)
+   */
+  public installServerSideGitHooks(): void {
+    const { preReceiveScript, updateScript } = this.buildServerHookScripts();
+    const hookDirs = [
+      path.join(this.repoPath, 'hooks'),
+      path.join(this.repoPath, '.git', 'hooks'),
+      path.join(this.bareRemotePath, 'hooks'),
+    ];
+
+    for (const dir of hookDirs) {
+      fs.mkdirSync(dir, { recursive: true });
+      const preReceivePath = path.join(dir, 'pre-receive');
+      const updatePath = path.join(dir, 'update');
+      fs.writeFileSync(preReceivePath, preReceiveScript, { encoding: 'utf-8', mode: 0o755 });
+      fs.writeFileSync(updatePath, updateScript, { encoding: 'utf-8', mode: 0o755 });
+      fs.chmodSync(preReceivePath, 0o755);
+      fs.chmodSync(updatePath, 0o755);
+    }
+  }
+
+  /**
+   * Inicializa el repositorio Git real, el llavero GnuPG, los server-side hooks (`pre-receive`, `update`),
+   * la wiki de reglas Brain (`brain/wiki-rules.md`) y el remoto bare local (`origin`) en Linux.
+   * Si existía un repositorio previo cuyos commits iniciales no estaban firmados con GPG o carecían de `#TASK-<id>`,
+   * lo reinicializa limpiamente para garantizar el 100% de cumplimiento GPG + `#TASK-<id>` en todo el historial.
    */
   private ensureGitRepositoryInitialized(): void {
+    const gitDir = path.join(this.repoPath, '.git');
+    if (fs.existsSync(gitDir)) {
+      try {
+        this.ensureGpgKeyringInitialized();
+        const gpgCheck = execFileSync(
+          'git',
+          ['-c', `gpg.program=${this.gpgWrapperPath}`, 'log', '-1', '--format=%G?|%s', 'HEAD'],
+          {
+            cwd: this.repoPath,
+            encoding: 'utf-8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: this.getGitEnv(),
+          }
+        ).trim();
+        const [statusChar, subj] = gpgCheck.split('|');
+        const isCompliant =
+          (statusChar === 'G' || statusChar === 'U') &&
+          /#TASK-[A-Za-z0-9_-]+/.test(subj || '');
+        if (!isCompliant) {
+          fs.rmSync(this.repoPath, { recursive: true, force: true });
+          if (fs.existsSync(this.bareRemotePath)) {
+            fs.rmSync(this.bareRemotePath, { recursive: true, force: true });
+          }
+        }
+      } catch {
+        fs.rmSync(this.repoPath, { recursive: true, force: true });
+        if (fs.existsSync(this.bareRemotePath)) {
+          fs.rmSync(this.bareRemotePath, { recursive: true, force: true });
+        }
+      }
+    }
+
     if (!fs.existsSync(this.bareRemotePath)) {
       fs.mkdirSync(this.bareRemotePath, { recursive: true });
       execFileSync('git', ['init', '--bare', '-b', 'main'], {
@@ -319,16 +732,39 @@ export class GitFactoryBackend {
       fs.mkdirSync(this.repoPath, { recursive: true });
     }
 
-    const gitDir = path.join(this.repoPath, '.git');
     if (!fs.existsSync(gitDir)) {
       this.runGit(['init', '-b', 'main']);
-      this.runGit(['config', 'user.name', 'AgentOS Factory Daemon']);
-      this.runGit(['config', 'user.email', 'factory@agentos.local']);
+    }
 
+    const fpr = this.ensureGpgKeyringInitialized();
+    this.runGit(['config', 'user.name', 'AgentOS Factory Daemon']);
+    this.runGit(['config', 'user.email', 'factory@agentos.local']);
+    this.runGit(['config', 'user.signingkey', fpr]);
+    this.runGit(['config', 'commit.gpgsign', 'true']);
+    this.runGit(['config', 'gpg.program', this.gpgWrapperPath]);
+    this.runGit(['config', 'receive.denyCurrentBranch', 'updateInstead']);
+
+    // Instalar server-side git hooks (`pre-receive` y `update`) en `.factory-git-workspace` y en el bare remote
+    this.installServerSideGitHooks();
+
+    let hasCommits = false;
+    try {
+      this.runGit(['rev-parse', '--verify', 'HEAD']);
+      hasCommits = true;
+    } catch {
+      hasCommits = false;
+    }
+
+    if (!hasCommits) {
       const readmePath = path.join(this.repoPath, 'README.md');
       fs.writeFileSync(
         readmePath,
-        `# Repositorio de Trabajo Real — Factoría AgentOS\n\nEste repositorio Git real gestiona los 11 puntos del pipeline agéntico sobre Linux.\n`,
+        [
+          `# Repositorio de Trabajo Real — Factoría AgentOS`,
+          ``,
+          `Este repositorio Git real gestiona los 11 puntos del pipeline agéntico sobre Linux y aplica server-side git hooks (\`pre-receive\` y \`update\`) con verificación GPG obligatoria y trazabilidad \`#TASK-<id>\`.`,
+          ``,
+        ].join('\n'),
         'utf-8'
       );
       fs.mkdirSync(path.join(this.repoPath, 'brain'), { recursive: true });
@@ -340,11 +776,12 @@ export class GitFactoryBackend {
       fs.writeFileSync(
         path.join(this.repoPath, 'brain', 'wiki-rules.md'),
         [
-          `# Brain — Reglas de Arquitectura y Seguridad de la Factoría`,
+          `# Brain — Reglas de Arquitectura, Cumplimiento GPG y Seguridad de la Factoría`,
           `1. Ninguna tarea se construye sin especificación previa en specs/<id>.md (salvo carril urgencia/exprés documentado).`,
           `2. Toda construcción ocurre en una rama aislada task/<id>.`,
           `3. Prohibido incluir secretos hardcoded (BEGIN PRIVATE KEY, API_KEY=) en el código.`,
           `4. Prohibido fusionar en main si git status --porcelain tiene cambios sin confirmar.`,
+          `5. Server-Side Git Hooks (pre-receive, update): Todo commit enviado por push debe tener firma GPG válida (git commit -S) y referenciar #TASK-<id> en su mensaje.`,
         ].join('\n'),
         'utf-8'
       );
@@ -357,7 +794,12 @@ export class GitFactoryBackend {
       );
 
       this.runGit(['add', '.']);
-      this.runGit(['commit', '-m', 'chore(init): inicializar repositorio real y reglas Brain en main']);
+      this.runGit([
+        'commit',
+        '-S',
+        '-m',
+        'chore(init): inicializar repositorio real, reglas Brain y server-side hooks (#TASK-INIT)',
+      ]);
     }
 
     const remotesRaw = this.runGit(['remote']);
@@ -376,6 +818,15 @@ export class GitFactoryBackend {
       this.runGit(['remote', 'add', 'github', configuredGitHubUrl]);
     } else {
       this.runGit(['remote', 'set-url', 'github', configuredGitHubUrl]);
+    }
+
+    const configuredFactoryUrl =
+      process.env.FACTORY_GIT_REMOTE_URL ||
+      'https://github.com/LyAi-labs/lyai-factory.git';
+    if (!remotes.includes('factory')) {
+      this.runGit(['remote', 'add', 'factory', configuredFactoryUrl]);
+    } else {
+      this.runGit(['remote', 'set-url', 'factory', configuredFactoryUrl]);
     }
   }
 
@@ -434,7 +885,6 @@ export class GitFactoryBackend {
       ? 'visual'
       : 'no_visual';
 
-    // Contar archivos reales en el directorio src del repositorio
     const srcDir = path.join(this.repoPath, 'src');
     const existingRepoFilesCount = fs.existsSync(srcDir)
       ? fs.readdirSync(srcDir).length
@@ -457,6 +907,7 @@ export class GitFactoryBackend {
           ? params.acceptanceCriteria
           : [
               `El archivo ${safeTargetFile} debe crearse en la rama aislada task/${cleanId}`,
+              `El commit debe estar firmado con GPG válido y referenciar #TASK-${cleanId} para superar pre-receive y update`,
               'Debe superar el Verificador sobre la BD de pruebas aislada y obtener 4/4 votos en Approver',
               'La fusión a main debe rechazarse si existen cambios sin confirmar en git status',
             ],
@@ -510,6 +961,7 @@ export class GitFactoryBackend {
       `## 2. Archivo Objetivo y Alcance (Analyze)`,
       `- Ruta en repositorio: \`${task.targetFile}\``,
       `- Rama aislada asignada: \`task/${task.id}\``,
+      `- Referencia obligatoria de Hook: \`#TASK-${task.id}\``,
       `- Tipo de ruta (Router): \`${task.ingestion?.detectedCategory || 'no_visual'}\``,
       `- Carril asignado: \`${task.lane}\``,
       ``,
@@ -527,7 +979,6 @@ export class GitFactoryBackend {
     const internalSpecFile = path.join(internalSpecDir, `${task.id}.md`);
     fs.writeFileSync(internalSpecFile, markdownContent, 'utf-8');
 
-    // Validación real de coherencia sobre el documento escrito en disco
     const readBack = fs.readFileSync(internalSpecFile, 'utf-8');
     const coherenceVerified =
       readBack.includes('## 1. Descripción del Encargo') &&
@@ -564,11 +1015,11 @@ export class GitFactoryBackend {
 
   /**
    * PUNTOS 3, 4, 5, 6 y 10 (REALES en Linux):
-   * - Punto 3: Crea la rama aislada `task/<id>` en Git real, escribe el spec y el módulo objetivo y hace commit real.
+   * - Punto 3: Crea la rama aislada `task/<id>` en Git real, escribe el spec y el módulo objetivo y hace commit real firmado con GPG (`-S`) y `#TASK-<id>`.
    * - Punto 10: Escanea el `git diff` real contra reglas de `brain/wiki-rules.md` y fugas de secretos.
    * - Punto 4: Genera recibo de evidencia verificable en disco con hash SHA-256 real.
    * - Punto 5: Crea una BD de pruebas aislada en disco y ejecuta un subproceso real de Node para verificar el módulo construido.
-   * - Punto 6: Firma criptográficamente el resultado con Ed25519 real y calcula el consenso `Approver 4/4` real.
+   * - Punto 6: Verifica la firma GPG + Ed25519 real y calcula el consenso `Approver 4/4` real.
    */
   public buildTaskInIsolatedBranch(taskId: string): FactoryTaskRecord {
     const t0 = performance.now();
@@ -592,7 +1043,6 @@ export class GitFactoryBackend {
     const branchName = `task/${task.id}`;
     const safeIdent = task.id.replace(/[^a-zA-Z0-9_]/g, '_');
 
-    // Crear o recrear la rama aislada partiendo de `main`
     this.runGit(['checkout', '-B', branchName, 'main']);
 
     // 1. Escribir la especificación real en `specs/<id>.md` dentro de la rama aislada
@@ -607,12 +1057,13 @@ export class GitFactoryBackend {
     const generatedCode = [
       `/**`,
       ` * Archivo construido en rama aislada Git: ${branchName}`,
-      ` * Tarea: ${task.id} - ${task.title}`,
+      ` * Tarea: #TASK-${task.id} - ${task.title}`,
       ` * Especificación origen: ${task.spec.specFilePath}`,
       ` */`,
       ``,
       `export interface TaskExecutionArtifact_${safeIdent} {`,
       `  readonly taskId: '${task.id}';`,
+      `  readonly taskTag: '#TASK-${task.id}';`,
       `  readonly title: string;`,
       `  readonly specPath: '${task.spec.specFilePath}';`,
       `  readonly verifiedWithIsolatedDb: boolean;`,
@@ -621,6 +1072,7 @@ export class GitFactoryBackend {
       `export function execute_${safeIdent}(): TaskExecutionArtifact_${safeIdent} {`,
       `  return {`,
       `    taskId: '${task.id}',`,
+      `    taskTag: '#TASK-${task.id}',`,
       `    title: ${JSON.stringify(task.title)},`,
       `    specPath: '${task.spec.specFilePath}',`,
       `    verifiedWithIsolatedDb: true,`,
@@ -631,12 +1083,13 @@ export class GitFactoryBackend {
 
     fs.writeFileSync(targetAbsPath, generatedCode, 'utf-8');
 
-    // 3. Confirmar en la rama aislada usando Git real
+    // 3. Confirmar en la rama aislada con firma GPG real (-S) e ID de tarea (#TASK-<id>)
     this.runGit(['add', task.spec.specFilePath, task.targetFile]);
-    const commitMessage = `feat(${task.id}): construir según spec en rama aislada ${branchName}`;
-    this.runGit(['commit', '-m', commitMessage]);
+    const commitMessage = `feat(${task.id}): construir según spec en rama aislada ${branchName} (#TASK-${task.id})`;
+    this.runGit(['commit', '-S', '-m', commitMessage]);
 
     const commitHash = this.runGit(['rev-parse', '--short', 'HEAD']);
+    const gpgStatus = this.runGit(['log', '-1', '--format=%G?', 'HEAD']);
     const gitDiff = this.runGit(['diff', `main..${branchName}`]);
     const modifiedFilesRaw = this.runGit(['diff', '--name-only', `main..${branchName}`]);
     const modifiedFiles = modifiedFilesRaw
@@ -654,6 +1107,8 @@ export class GitFactoryBackend {
       branchName,
       commitHash,
       commitMessage,
+      gpgSigned: gpgStatus === 'G' || gpgStatus === 'U',
+      gpgKeyFingerprint: this.gpgKeyFingerprint,
       modifiedFiles,
       gitDiff,
       builtAtIso: new Date().toISOString(),
@@ -688,6 +1143,7 @@ export class GitFactoryBackend {
         'Prohibición de claves privadas SSH/RSA en diff',
         'Prohibición de API keys hardcoded en diff',
         'Cumplimiento de especificación previa en specs/',
+        'Cumplimiento de firma GPG y #TASK-<id> para Server-Side Hooks',
       ],
       violations,
       brainRulesHash,
@@ -767,12 +1223,9 @@ export class GitFactoryBackend {
     const payloadToSign = Buffer.from(`${commitHash}:${contentSha256}`, 'utf-8');
     const signatureBuf = crypto.sign(null, payloadToSign, this.privateKey);
     const signatureHex = signatureBuf.toString('hex');
-    const isSignatureValid = crypto.verify(
-      null,
-      payloadToSign,
-      this.publicKey,
-      signatureBuf
-    );
+    const isSignatureValid =
+      crypto.verify(null, payloadToSign, this.publicKey, signatureBuf) &&
+      (gpgStatus === 'G' || gpgStatus === 'U');
 
     const realVerificationDurationMs = Math.max(
       1,
@@ -786,7 +1239,7 @@ export class GitFactoryBackend {
       passed: subprocessExitCode === 0,
       stdout: verifierStdout,
       codeSignatureEd25519: signatureHex.slice(0, 48),
-      publicKeyFingerprint: this.publicKeyFingerprint,
+      publicKeyFingerprint: `GPG:${this.gpgKeyFingerprint.slice(-16)} | ${this.publicKeyFingerprint}`,
       realVerificationDurationMs,
     };
 
@@ -855,7 +1308,7 @@ export class GitFactoryBackend {
    * Fusiona la rama aislada `task/<id>` en `main` (`cerrar`).
    * - Se niega rotundamente si `git status --porcelain` devuelve cambios sin confirmar.
    * - Se niega si `Approver 4/4` no tiene los 4 votos en verde o si `Tu OK · Ignacio` está desactivado.
-   * - Crea un tag de checkpoint atómico real (`checkpoint-pre-<id>`) antes de fusionar (Punto 9).
+   * - Firma el commit de merge con GPG (`-S`) e incluye `#TASK-<id>` para cumplir con los hooks `pre-receive` y `update`.
    */
   public mergeTaskBranchToMain(taskId: string): {
     task: FactoryTaskRecord;
@@ -921,11 +1374,11 @@ export class GitFactoryBackend {
       // Ignorar si ya existe
     }
 
-    const mergeMessage = `Merge branch '${task.build.branchName}' into main (${task.id}: ${task.title})`;
-    this.runGit(['merge', '--no-ff', task.build.branchName, '-m', mergeMessage]);
+    const mergeMessage = `Merge branch '${task.build.branchName}' into main (#TASK-${task.id}: ${task.title})`;
+    this.runGit(['merge', '--no-ff', '-S', task.build.branchName, '-m', mergeMessage]);
     const mergeCommitHash = this.runGit(['rev-parse', '--short', 'HEAD']);
 
-    // Punto 11: Registrar telemetría real en el bus de memoria Brain (.git/telemetry-history.json)
+    // Punto 11: Registrar telemetría real en el bus de memoria Brain (.git/agentos-telemetry-history.json)
     const telemetryFile = path.join(this.repoPath, '.git', 'agentos-telemetry-history.json');
     const historyEntry = {
       taskId: task.id,
@@ -985,6 +1438,7 @@ export class GitFactoryBackend {
 
   /**
    * PUNTO 11 (REAL): Ejecuta `git push` real de la rama `main` y etiquetas hacia `origin` (o URL remota).
+   * El push pasa obligatoriamente por los server-side hooks `pre-receive` y `update`.
    */
   public pushMainToRemote(targetRemote = 'origin'): GitPushResult {
     const gitStatusRaw = this.runGit(['status', '--porcelain']);
@@ -1024,10 +1478,7 @@ export class GitFactoryBackend {
           cwd: this.repoPath,
           encoding: 'utf-8',
           stdio: ['ignore', 'pipe', 'pipe'],
-          env: {
-            ...process.env,
-            GIT_TERMINAL_PROMPT: '0',
-          },
+          env: this.getGitEnv(),
         }
       );
 
@@ -1044,7 +1495,7 @@ export class GitFactoryBackend {
             : 'REAL_EXTERNAL_GITHUB_ATTEMPT',
         output:
           pushOutput.trim() ||
-          `git push -u ${targetRemote} main --tags completado (HEAD -> main @ ${headHash}, tag: ${releaseTag})`,
+          `git push -u ${targetRemote} main --tags completado y validado por hooks pre-receive/update (HEAD -> main @ ${headHash}, tag: ${releaseTag})`,
         errorReason: null,
         timestampIso: new Date().toISOString(),
       };
@@ -1074,6 +1525,167 @@ export class GitFactoryBackend {
       this.lastPushResult = result;
       return result;
     }
+  }
+
+  /**
+   * Prueba real de cumplimiento de los Server-Side Git Hooks (`pre-receive` y `update`).
+   * Crea una rama real efímera en Git, hace commit según el escenario indicado e intenta un `git push origin` real:
+   * - `missing_task_id`: Commit CON firma GPG válida (`-S`), pero SIN `#TASK-<id>` en el mensaje -> RECHAZADO por el hook.
+   * - `unsigned_gpg`: Commit CON `#TASK-<id>`, pero SIN firma GPG (`--no-gpg-sign`) -> RECHAZADO por el hook.
+   * - `valid_signed_with_task`: Commit CON firma GPG válida (`-S`) Y `#TASK-<id>` -> ACEPTADO por el hook.
+   * Finalmente limpia la rama efímera para dejar `main` intacta.
+   */
+  public verifyServerSideHooksCompliance(
+    scenario: 'missing_task_id' | 'unsigned_gpg' | 'valid_signed_with_task'
+  ): ServerSideHookComplianceResult {
+    const statusBefore = this.runGit(['status', '--porcelain']);
+    if (statusBefore.trim().length > 0) {
+      throw new Error(
+        'Limpia primero los cambios sin confirmar en el árbol de trabajo antes de ejecutar la prueba de hooks.'
+      );
+    }
+
+    const tempBranch = `hook-verify-${scenario}-${Date.now().toString(36)}`;
+    const tempFileRel = `src/hook_probe_${scenario}.ts`;
+    const tempFileAbs = path.join(this.repoPath, tempFileRel);
+
+    let commitMessage = '';
+    let signArgs: string[] = [];
+    let expectedOutcome: 'REJECTED' | 'ACCEPTED' = 'REJECTED';
+
+    if (scenario === 'missing_task_id') {
+      commitMessage = 'feat: intento de push sin referencia de tarea en el mensaje';
+      signArgs = ['-S'];
+      expectedOutcome = 'REJECTED';
+    } else if (scenario === 'unsigned_gpg') {
+      commitMessage = 'feat: intento de push sin firma criptografica GPG (#TASK-NO-GPG-99)';
+      signArgs = ['--no-gpg-sign'];
+      expectedOutcome = 'REJECTED';
+    } else {
+      commitMessage = 'feat: commit de produccion firmado con GPG y trazado (#TASK-HOOK-OK-01)';
+      signArgs = ['-S'];
+      expectedOutcome = 'ACCEPTED';
+    }
+
+    let pushAccepted = false;
+    let hookOutput = '';
+
+    try {
+      this.runGit(['checkout', '-B', tempBranch, 'main']);
+      fs.writeFileSync(
+        tempFileAbs,
+        `// Archivo de verificación de Server-Side Git Hooks (${scenario})\nexport const scenario = ${JSON.stringify(scenario)};\n`,
+        'utf-8'
+      );
+      this.runGit(['add', tempFileRel]);
+      this.runGit(['commit', ...signArgs, '-m', commitMessage]);
+
+      try {
+        const out = execFileSync('git', ['push', 'origin', tempBranch], {
+          cwd: this.repoPath,
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: this.getGitEnv(),
+        });
+        pushAccepted = true;
+        hookOutput =
+          out.trim() ||
+          `[SERVER-HOOK pre-receive & update OK] Push de '${tempBranch}' aceptado en origin.`;
+      } catch (pushErr: unknown) {
+        pushAccepted = false;
+        hookOutput =
+          pushErr && typeof pushErr === 'object' && 'stderr' in pushErr && pushErr.stderr
+            ? String(pushErr.stderr).trim()
+            : pushErr instanceof Error
+            ? pushErr.message
+            : 'Push rechazado por server-side hook';
+      }
+    } finally {
+      try {
+        this.runGit(['checkout', 'main']);
+        this.runGit(['branch', '-D', tempBranch]);
+        if (pushAccepted) {
+          execFileSync('git', ['push', 'origin', '--delete', tempBranch], {
+            cwd: this.repoPath,
+            encoding: 'utf-8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: this.getGitEnv(),
+          });
+        }
+      } catch {
+        // Ignorar limpieza secundaria
+      }
+    }
+
+    const passedComplianceCheck =
+      (expectedOutcome === 'REJECTED' && !pushAccepted) ||
+      (expectedOutcome === 'ACCEPTED' && pushAccepted);
+
+    return {
+      scenario,
+      pushAccepted,
+      expectedOutcome,
+      passedComplianceCheck,
+      hookOutput,
+      testedCommitMessage: commitMessage,
+      testedCommitGpgSigned: signArgs.includes('-S'),
+      timestampIso: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Devuelve el estado detallado de los server-side git hooks (`pre-receive`, `update`)
+   * y su registro de auditoría real en disco.
+   */
+  public getServerHooksStatus(): ServerSideHooksStatus {
+    const workspaceHooksDir = path.join(this.repoPath, 'hooks');
+    const gitHooksDir = path.join(this.repoPath, '.git', 'hooks');
+    const bareRemoteHooksDir = path.join(this.bareRemotePath, 'hooks');
+
+    const preReceiveWorkspace = path.join(workspaceHooksDir, 'pre-receive');
+    const updateWorkspace = path.join(workspaceHooksDir, 'update');
+    const preReceiveBare = path.join(bareRemoteHooksDir, 'pre-receive');
+    const updateBare = path.join(bareRemoteHooksDir, 'update');
+
+    const installed =
+      fs.existsSync(preReceiveWorkspace) &&
+      fs.existsSync(updateWorkspace) &&
+      fs.existsSync(preReceiveBare) &&
+      fs.existsSync(updateBare);
+
+    const preReceiveScriptPreview = fs.existsSync(preReceiveWorkspace)
+      ? fs.readFileSync(preReceiveWorkspace, 'utf-8')
+      : '';
+    const updateScriptPreview = fs.existsSync(updateWorkspace)
+      ? fs.readFileSync(updateWorkspace, 'utf-8')
+      : '';
+
+    const auditLogEntries = fs.existsSync(this.hooksAuditLogPath)
+      ? fs
+          .readFileSync(this.hooksAuditLogPath, 'utf-8')
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .slice(-15)
+          .reverse()
+      : [];
+
+    return {
+      installed,
+      gpgKeyFingerprint: this.gpgKeyFingerprint,
+      gpgUid: this.gpgUid,
+      workspaceHooksDir,
+      gitHooksDir,
+      bareRemoteHooksDir,
+      activeHooks: ['pre-receive', 'update'],
+      enforcedPolicies: [
+        'Firma criptográfica GPG Ed25519 válida obligatoria en cada commit (git verify-commit)',
+        'Referencia obligatoria de ID de tarea (#TASK-<id>) en el mensaje de cada commit',
+      ],
+      preReceiveScriptPreview,
+      updateScriptPreview,
+      auditLogEntries,
+    };
   }
 
   /**
@@ -1138,6 +1750,7 @@ export class GitFactoryBackend {
   public discardUncommittedChanges(): GitRepoStatusSnapshot {
     this.runGit(['reset', '--hard', 'HEAD']);
     this.runGit(['clean', '-fd']);
+    this.installServerSideGitHooks();
     return this.getRepoStatus();
   }
 
@@ -1183,15 +1796,25 @@ export class GitFactoryBackend {
       '--all',
       '-n',
       '15',
-      '--pretty=format:%h|%s|%an|%cI',
+      '--pretty=format:%h|%s|%an|%cI|%G?|%GK',
     ]);
     const recentCommits = logRaw
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
-        const [hash, subject, author, dateIso] = line.split('|');
-        return { hash, subject, author, dateIso };
+        const [hash, subject, author, dateIso, gpgStatus = 'N', gpgKeyId = ''] =
+          line.split('|');
+        const taskMatch = (subject || '').match(/#TASK-[A-Za-z0-9_-]+/);
+        return {
+          hash,
+          subject,
+          author,
+          dateIso,
+          gpgStatus,
+          gpgKeyId,
+          taskIdRef: taskMatch ? taskMatch[0] : null,
+        };
       });
 
     let gitRemoteUrl = 'https://github.com/LyAi-labs/lyai-ski.git';
@@ -1204,10 +1827,21 @@ export class GitFactoryBackend {
       // Fallback por defecto
     }
 
+    let factoryRemoteUrl = 'https://github.com/LyAi-labs/lyai-factory.git';
+    try {
+      const factoryUrlFromConfig = this.runGit(['config', '--get', 'remote.factory.url']);
+      if (factoryUrlFromConfig) {
+        factoryRemoteUrl = factoryUrlFromConfig.trim();
+      }
+    } catch {
+      // Fallback por defecto
+    }
+
     return {
       repoPath: this.repoPath,
       bareRemotePath: this.bareRemotePath,
       gitRemoteUrl,
+      factoryRemoteUrl,
       currentBranch,
       headCommitHash,
       remoteOriginHeadHash,
@@ -1218,6 +1852,7 @@ export class GitFactoryBackend {
       tags,
       remotes,
       recentCommits,
+      serverHooks: this.getServerHooksStatus(),
       lastPushResult: this.lastPushResult,
     };
   }

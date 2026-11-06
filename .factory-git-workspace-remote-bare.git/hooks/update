@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Server-Side Git Hook: update (Factoría AgentOS — Cumplimiento de Producción por Ref)
+# Impide actualizar cualquier ref si algún commit carece de firma GPG válida o de #TASK-<id>.
+set -euo pipefail
+UID_NUM=$(id -u)
+export GNUPGHOME="/tmp/agentos-gnupg-${UID_NUM}-064b5df701"
+mkdir -p -m 700 "$GNUPGHOME"
+if ! gpg --batch --no-tty --with-colons --list-keys 2>/dev/null | grep -q '^fpr:'; then
+  gpg --batch --no-tty --yes --import "/app/applet/.factory-git-workspace/.git/agentos-gpg-key.asc" >/dev/null 2>&1 || true
+  gpg --batch --no-tty --yes --import-ownertrust "/app/applet/.factory-git-workspace/.git/agentos-gpg-trust.txt" >/dev/null 2>&1 || true
+fi
+AUDIT_LOG="/app/applet/.factory-git-workspace/.git/agentos-hooks-audit.log"
+ZERO_OID="0000000000000000000000000000000000000000"
+
+refname="${1:-}"
+oldrev="${2:-}"
+newrev="${3:-}"
+
+if [ -z "$refname" ] || [ -z "$newrev" ] || [ "$newrev" = "$ZERO_OID" ]; then
+  exit 0
+fi
+
+if [ "$oldrev" = "$ZERO_OID" ]; then
+  COMMITS=$(git rev-list "$newrev")
+else
+  COMMITS=$(git rev-list "${oldrev}..${newrev}")
+fi
+
+for commit in $COMMITS; do
+  SHORT_SHA=$(git rev-parse --short "$commit")
+  COMMIT_MSG=$(git log -1 --format=%B "$commit")
+  SUBJECT=$(git log -1 --format=%s "$commit")
+
+  # 1. Verificar referencia obligatoria a ID de tarea (#TASK-<id>)
+  if ! printf '%s\n' "$COMMIT_MSG" | grep -Eq '#TASK-[A-Za-z0-9_-]+'; then
+    echo "[SERVER-HOOK update RECHAZADO] Ref ${refname}: El commit ${SHORT_SHA} no referencia un ID de tarea (#TASK-<id>): \"${SUBJECT}\"" >&2
+    echo "$(date -Iseconds) | update | REJECTED_NO_TASK_ID | ${SHORT_SHA} | ${refname} | ${SUBJECT}" >> "$AUDIT_LOG"
+    exit 1
+  fi
+
+  # 2. Verificar firma criptográfica GPG válida
+  GPG_STATUS=$(git -c gpg.program="/app/applet/.factory-git-workspace/.git/gpg-wrapper.sh" log -1 --format=%G? "$commit" || true)
+  if ! git -c gpg.program="/app/applet/.factory-git-workspace/.git/gpg-wrapper.sh" verify-commit "$commit" >/dev/null 2>&1 || { [ "$GPG_STATUS" != "G" ] && [ "$GPG_STATUS" != "U" ]; }; then
+    echo "[SERVER-HOOK update RECHAZADO] Ref ${refname}: El commit ${SHORT_SHA} NO tiene una firma GPG válida (estado GPG: ${GPG_STATUS:-N})." >&2
+    echo "$(date -Iseconds) | update | REJECTED_INVALID_GPG | ${SHORT_SHA} | ${refname} | GPG=${GPG_STATUS:-N}" >> "$AUDIT_LOG"
+    exit 1
+  fi
+done
+
+echo "$(date -Iseconds) | update | ACCEPTED | ${refname} | ${newrev}" >> "$AUDIT_LOG"
+echo "[SERVER-HOOK update OK] Ref ${refname} verificada (GPG + #TASK-<id>)." >&2
+exit 0
