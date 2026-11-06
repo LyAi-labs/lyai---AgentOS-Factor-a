@@ -262,6 +262,11 @@ export function usePipelineSocket() {
     ]);
   };
 
+  const appendActivityLogs = useCallback((newLogs: ActivityLogEntry[]) => {
+    if (!newLogs || newLogs.length === 0) return;
+    setActivityLogs((prev) => [...newLogs, ...prev].slice(0, 60));
+  }, []);
+
   return {
     nodes,
     edges,
@@ -279,5 +284,6 @@ export function usePipelineSocket() {
     setSpeedMultiplier,
     createTask,
     injectFault,
+    appendActivityLogs,
   };
 }

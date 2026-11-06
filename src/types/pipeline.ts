@@ -238,6 +238,32 @@ export interface SimulationScenario {
   expectedOutcome: 'pass_nominal' | 'self_healed' | 'security_blocked' | 'rolled_back' | 'recovered_backoff';
 }
 
+export type ChaosFailurePattern =
+  | 'burst_intermittent'
+  | 'cascading_degradation'
+  | 'random_byzantine'
+  | 'latency_brownout';
+
+export interface AgentChaosConfig {
+  enabled: boolean;
+  failureProbabilityPercent: number; // 0 a 80% probabilidad de fallo intermitente por nodo
+  artificialLatencyJitterMs: number; // 0 a 2500ms de latencia sintética no-determinista
+  pattern: ChaosFailurePattern;
+  targetNodeIds: string[];           // Vacío = selección estocástica sobre todo el grafo
+  seed?: number;                     // Semilla opcional para pruebas deterministas
+}
+
+export interface NodeChaosPerturbation {
+  nodeId: string;
+  nodeName: string;
+  layer: NodeLayer;
+  injectedLatencyMs: number;
+  intermittentFailureTriggered: boolean;
+  failurePatternApplied: ChaosFailurePattern;
+  recoveryAction: string;
+  resilienceImpactScore: number;
+}
+
 export interface SimulationResult {
   scenarioId: string;
   timestamp: number;
@@ -252,6 +278,8 @@ export interface SimulationResult {
     severity: 'low' | 'medium' | 'high' | 'critical';
     handled: boolean;
   }[];
+  chaosModeActive?: boolean;
+  chaosPerturbations?: NodeChaosPerturbation[];
 }
 
 // ==========================================
@@ -353,5 +381,299 @@ export interface LaneResourceConsumption {
   color: string;
 }
 
+// ==========================================
+// ÍNDICE DE AUTONOMÍA DEL NODO (NODE AUTONOMY INDEX)
+// ==========================================
+
+export type AutonomyLevel =
+  | 'autonomous_l5'
+  | 'high_confidence_l4'
+  | 'supervised_l3'
+  | 'human_in_loop_l2';
+
+export interface NodeAutonomyIndex {
+  nodeId: string;
+  nodeName: string;
+  confidenceScore: number;        // 0 a 100 (Índice compuesto de confianza y autonomía)
+  reliabilityScore: number;       // 0 a 100 (Tasa histórica de éxito y penalización por errores)
+  latencyEfficiencyScore: number; // 0 a 100 (Eficiencia de latencia p95 frente a SLA/timeout)
+  stabilityScore: number;         // 0 a 100 (Gobernanza determinista, modo estricto y estado operativo)
+  successRatePercent: number;     // Porcentaje histórico exacto de éxito (0 - 100%)
+  slaCompliancePercent: number;   // Margen de cumplimiento de SLA de latencia (0 - 100%)
+  autonomyLevel: AutonomyLevel;
+  levelLabel: string;
+  badgeColor: string;
+  recommendation: string;
+}
+
+// ==========================================
+// RASTREADOR DE LATENCIA EN VIVO (LIVE LATENCY TRACKER & SPARKLINES)
+// ==========================================
+
+export interface LatencySamplePoint {
+  sampleIndex: number;
+  timestampOffsetSec: number; // Ej. -45s ... 0s (ahora)
+  latencyMs: number;
+  isSpike: boolean;           // true si supera el umbral de pico (> 1.3x del promedio histórico)
+}
+
+export interface NodeLatencyTrackerData {
+  nodeId: string;
+  nodeName: string;
+  currentExecutionMs: number;
+  historicalAvgMs: number;
+  p95LatencyMs: number;
+  spikeThresholdMs: number;
+  deltaMs: number;            // currentExecutionMs - historicalAvgMs
+  deltaPercent: number;       // Variación porcentual frente al promedio histórico
+  peakLatencyMs: number;
+  minLatencyMs: number;
+  jitterMs: number;           // Variabilidad media (ms)
+  spikeCount: number;
+  status: 'nominal' | 'elevated' | 'spike_detected';
+  statusLabel: string;
+  samples: LatencySamplePoint[];
+}
+
+// ==========================================
+// MONITOR PROACTIVO DE SALUD (PROACTIVE HEALTH MONITOR & DRIFT DETECTOR)
+// ==========================================
+
+export type DriftAlertType =
+  | 'latency_spike_drift'
+  | 'error_frequency_drift'
+  | 'thermal_bottleneck_drift'
+  | 'autonomy_degradation_drift';
+
+export type DriftSeverity = 'warning' | 'critical';
+
+export interface ProactiveDriftAlert {
+  id: string;
+  timestamp: number;
+  nodeId: string;
+  nodeName: string;
+  layer: NodeLayer;
+  driftType: DriftAlertType;
+  severity: DriftSeverity;
+  metricLabel: string;
+  currentValue: string;
+  thresholdValue: string;
+  message: string;
+  suggestedAction: string;
+}
+
+export interface ProactiveHealthReport {
+  scannedAt: number;
+  nodesScanned: number;
+  overallHealthScore: number; // 0 a 100
+  status: 'healthy' | 'drift_detected' | 'critical_alert';
+  activeAlerts: ProactiveDriftAlert[];
+  topSuggestedNodeId: string | null;
+  topSuggestedNodeName: string | null;
+  generatedLogs: ActivityLogEntry[];
+}
 
 
+
+
+
+
+
+// ==========================================
+// SIMULACIÓN EN LOTE (BATCH SIMULATION ENGINE)
+// ==========================================
+export interface BatchScenarioQueueItem {
+  id: string;
+  scenarioId: string;
+  scenarioName: string;
+  lane: TaskLane;
+  priority: TaskPriority;
+  weight: number; // Factor multiplicador o carga relativa
+  concurrencyLevel: number; // Cuántas tareas paralelas simula este item
+  customOverrides?: Partial<SimulationConditions>;
+  customChaos?: Partial<AgentChaosConfig>;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  result?: SimulationResult;
+}
+
+export interface BatchSimulationRunSummary {
+  batchId: string;
+  startedAt: number;
+  completedAt?: number;
+  totalScenarios: number;
+  completedCount: number;
+  failedCount: number;
+  healedCount: number;
+  quarantinedCount: number;
+  totalSimulatedDurationSec: number;
+  aggregateTokensConsumed: number;
+  averageRobustnessScore: number;
+  peakThroughputTasksPerMin: number;
+  saturationBottleneckNodeId?: string;
+  results: Array<{
+    itemId: string;
+    scenarioName: string;
+    lane: TaskLane;
+    durationMs: number;
+    tokensConsumed: number;
+    robustnessScore: number;
+    status: 'passed' | 'failed' | 'healed' | 'quarantined';
+    chaosActive: boolean;
+    mitigationsCount: number;
+  }>;
+}
+
+// ==========================================
+// VISUALIZACIÓN DE DEPENDENCIAS DE TAREAS (TASK DEPENDENCY GRAPH)
+// ==========================================
+export type DependencyType = 'blocks' | 'enables' | 'parallel_with' | 'validates';
+export type DependencyExecutionState = 'blocked' | 'ready' | 'running' | 'completed' | 'failed';
+
+export interface WorkflowTaskNode {
+  id: string;
+  title: string;
+  lane: TaskLane;
+  priority: TaskPriority;
+  agentNodeId: string;
+  agentNodeName: string;
+  layer: NodeLayer;
+  state: DependencyExecutionState;
+  progress: number;
+  durationMs: number;
+  tokens: number;
+  dependsOn: string[]; // IDs de tareas que deben completarse antes de habilitar esta
+  blocks: string[];    // IDs de tareas que esperan a que esta se complete
+  parallelGroup?: string; // Tareas que pueden ejecutarse concurrentemente
+  criticalPath: boolean;
+}
+
+export interface WorkflowDependencyLink {
+  id: string;
+  sourceTaskId: string;
+  targetTaskId: string;
+  type: DependencyType;
+  label?: string;
+  active: boolean; // Si la dependencia está activa o liberada
+}
+
+export interface TaskDependencyGraphData {
+  tasks: WorkflowTaskNode[];
+  links: WorkflowDependencyLink[];
+  criticalPathLengthMs: number;
+  parallelCapacityUtilization: number; // Porcentaje de paralelización efectiva
+  blockedTasksCount: number;
+  readyTasksCount: number;
+  runningTasksCount: number;
+  completedTasksCount: number;
+}
+
+// ==========================================
+// BALANCEADOR PREDICTIVO DE CARGA (PREDICTIVE LOAD BALANCER)
+// ==========================================
+export interface LaneQueuePressure {
+  lane: TaskLane;
+  laneLabel: string;
+  queuedTasksCount: number;
+  runningTasksCount: number;
+  totalPendingTasks: number;
+  estimatedQueueTimeSec: number;
+  saturationRatio: number; // 0 a 100%
+  status: 'underutilized' | 'balanced' | 'approaching_saturation' | 'congested';
+  statusColor: string;
+}
+
+export interface PredictiveRedistributionSuggestion {
+  id: string;
+  taskId: string;
+  taskTitle: string;
+  sourceLane: TaskLane;
+  suggestedTargetLane: TaskLane;
+  priority: TaskPriority;
+  estimatedLatencySavingSec: number;
+  throughputGainPercent: number;
+  reason: string;
+  confidenceScore: number; // 0 - 100%
+}
+
+export interface PredictiveLoadBalancerReport {
+  timestamp: number;
+  globalQueueDepth: number;
+  imbalanceScore: number; // 0 a 100% (0 = perfectamente equilibrado, 100 = máxima asimetría)
+  systemStatus: 'optimal' | 'imbalanced' | 'critical_congestion';
+  lanePressures: Record<TaskLane, LaneQueuePressure>;
+  suggestions: PredictiveRedistributionSuggestion[];
+  totalPotentialThroughputGainPercent: number;
+  activeAutoRebalancing: boolean;
+}
+
+// ==========================================
+// LIBRO MAYOR DE TOKENS & CRÉDITOS DE AGENTES (RESOURCE TOKEN LEDGER)
+// ==========================================
+export interface AgentNodeCreditConsumption {
+  nodeId: string;
+  nodeName: string;
+  layer: NodeLayer;
+  model: string;
+  tokensConsumed: number;
+  creditsConsumed: number; // 1 crédito = 1000 tokens (normalizado)
+  costUsd: number;
+  percentageOfTotal: number;
+  tasksServedCount: number;
+}
+
+export interface TaskSpendingLimitPolicy {
+  maxCreditsPerTask: number; // Límite de créditos por tarea (ej. 25 créditos = 25k tokens)
+  maxCostUsdPerTask: number; // Límite en USD (ej. $0.05)
+  actionOnLimitExceeded: 'warn' | 'throttle' | 'quarantine';
+  autoEnforceStrictTokenCap: boolean;
+}
+
+export interface ResourceTokenLedgerReport {
+  totalTokensConsumed: number;
+  totalAgentCredits: number; // Total créditos consumidos
+  totalCostUsd: number;
+  spendingPolicy: TaskSpendingLimitPolicy;
+  nodeConsumptions: AgentNodeCreditConsumption[];
+  topConsumingNodeId: string;
+  runawayRiskCount: number; // Tareas acercándose o superando el límite de créditos
+  recentTransactions: Array<{
+    id: string;
+    timestamp: number;
+    nodeId: string;
+    nodeName: string;
+    taskId: string;
+    creditsCharged: number;
+    tokensCharged: number;
+    status: 'settled' | 'capped' | 'warning';
+  }>;
+}
+
+// ==========================================
+// RESUMEN DE RENDIMIENTO DE NODO (NODE PERFORMANCE SUMMARY)
+// ==========================================
+export interface HourlyPerformancePoint {
+  hourIndex: number; // 0 to 23 (de 24h atrás a hora actual)
+  hour: string; // ej. "14:00" o "T-10h"
+  timestamp: number;
+  successCount: number;
+  errorCount: number;
+  totalExecutions: number;
+  successRate: number; // 0 a 100%
+  avgLatencyMs: number;
+}
+
+export interface NodePerformanceSummary {
+  nodeId: string;
+  nodeName: string;
+  total24hExecutions: number;
+  total24hSuccesses: number;
+  total24hErrors: number;
+  overall24hSuccessRate: number;
+  p95LatencyMs: number;
+  avgLatencyMs: number;
+  peakErrorHour: string;
+  peakVolumeHour: string;
+  trendStatus: 'optimal' | 'stable' | 'degrading' | 'investigate';
+  trendMessage: string;
+  hourlyPoints: HourlyPerformancePoint[];
+}

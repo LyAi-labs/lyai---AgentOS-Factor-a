@@ -7,15 +7,19 @@ import {
   Play,
   Pause,
   RotateCcw,
+  ShieldAlert,
+  Scale,
   FastForward,
   PlusCircle,
   FileCode2,
   Cpu,
+  Search,
   Layers,
   Activity,
   CheckCircle2,
   Clock,
   Sparkles,
+  Coins,
   TrendingUp,
   FileJson,
   GraduationCap,
@@ -39,6 +43,10 @@ interface HeaderHUDProps {
   onOpenTour?: () => void;
   laneConsumption?: Record<TaskLane, LaneResourceConsumption>;
   onOpenResources?: () => void;
+  onOpenDisasterRecovery?: () => void;
+  onOpenLoadBalancer?: () => void;
+  onOpenSearch?: () => void;
+  onOpenLedger?: () => void;
 }
 
 const LANE_SHORT_META: Array<{ lane: TaskLane; label: string; dotColor: string }> = [
@@ -64,6 +72,10 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
   onOpenTour,
   laneConsumption,
   onOpenResources,
+  onOpenDisasterRecovery,
+  onOpenLoadBalancer,
+  onOpenSearch,
+  onOpenLedger,
 }) => {
   const getBarColorClass = (status: LaneResourceConsumption['status']) => {
     switch (status) {
@@ -159,16 +171,21 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
 
             <div className="h-6 w-px bg-slate-800" />
 
-            {/* Token Usage & Cost */}
-            <div className="flex items-center gap-1.5 px-2 py-1">
-              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+            {/* Resource Token Ledger Interactive Button */}
+            <button
+              onClick={onOpenLedger}
+              data-testid="header-token-ledger-btn"
+              className="flex items-center gap-1.5 px-2 py-1 hover:bg-purple-500/10 rounded transition text-left cursor-pointer group"
+              title="Abrir Libro Mayor de Tokens (Resource Token Ledger) y Configurar Límites de Gasto por Tarea"
+            >
+              <Coins className="w-3.5 h-3.5 text-purple-400 group-hover:scale-110 transition shrink-0" />
               <div className="flex flex-col">
-                <span className="text-[9px] text-slate-400 uppercase tracking-wider">Tokens / Costo</span>
-                <span className="font-bold text-purple-300">
-                  {(telemetry.totalTokensUsed / 1000).toFixed(0)}k <span className="text-slate-400 text-[10px]">(${telemetry.estimatedCostUsd})</span>
+                <span className="text-[9px] text-purple-400 uppercase tracking-wider font-bold">Agent Credits / Costo</span>
+                <span className="font-bold text-purple-200">
+                  {(telemetry.totalTokensUsed / 1000).toFixed(0)} cr <span className="text-slate-400 text-[10px]">(${telemetry.estimatedCostUsd})</span>
                 </span>
               </div>
-            </div>
+            </button>
 
             <div className="h-6 w-px bg-slate-800" />
 
@@ -189,6 +206,23 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
           </div>
 
           {/* Global Controls & Actions */}
+          {/* Global Search Quick Trigger */}
+          <div className="flex-1 max-w-xs mx-2 hidden lg:block">
+            <button
+              onClick={onOpenSearch}
+              data-testid="header-global-search-btn"
+              className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800/90 border border-slate-800 text-slate-400 hover:text-slate-200 transition font-mono text-xs cursor-pointer shadow-inner"
+            >
+              <div className="flex items-center gap-2 truncate">
+                <Search className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span className="truncate">Buscar nodos, tareas, logs...</span>
+              </div>
+              <kbd className="px-1.5 py-0.2 rounded bg-slate-950 border border-slate-700 text-[10px] text-slate-500 font-mono shrink-0">
+                ⌘K
+              </kbd>
+            </button>
+          </div>
+
           <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
             {/* Play/Pause */}
             <button
@@ -270,6 +304,24 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
               title="Exportar telemetría y grafo a JSON"
             >
               <FileJson className="w-3.5 h-3.5 text-emerald-400" /> Exportar JSON
+            </button>
+
+            {/* Predictive Load Balancer Button */}
+            <button
+              onClick={onOpenLoadBalancer}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-cyan-950/80 text-cyan-300 border border-cyan-700 hover:bg-cyan-900 font-mono text-xs font-semibold transition cursor-pointer"
+              title="Abrir Balanceador Predictivo de Carga (Predictive Load Balancer)"
+            >
+              <Scale className="w-3.5 h-3.5 text-cyan-400" /> Balanceador
+            </button>
+
+            {/* Disaster Recovery / SystemSnapshots Modal Button */}
+            <button
+              onClick={onOpenDisasterRecovery}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-rose-950/80 text-rose-300 border border-rose-700 hover:bg-rose-900 font-mono text-xs font-semibold transition cursor-pointer"
+              title="Abrir Servicio de Instantáneas SystemSnapshots (Cron 10m) y Recuperación ante Desastres"
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-400" /> Snapshots (10m)
             </button>
 
             {/* Dev Onboarding & Tutorial Tour */}

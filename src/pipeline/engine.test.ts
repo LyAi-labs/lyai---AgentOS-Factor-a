@@ -264,6 +264,9 @@ test('Pipeline Performance Report export generates complete structured JSON sche
 import {
   calculateAgentDensityMap,
   calculateLaneResourceConsumption,
+  calculateNodeAutonomyIndex,
+  calculateNodeLatencyTracker,
+  analyzeTelemetryDrift,
   DEFAULT_LANE_BUDGETS,
 } from './resourceManager';
 
@@ -310,6 +313,380 @@ test('Agent Density heat-map and Resource Allocation Manager compute node heat s
   assert.ok(throttledConsumption.standard.cpuUsagePercent > 100 || throttledConsumption.standard.memoryUsagePercent > 100);
 });
 
+// ==========================================
+// TEST NODE AUTONOMY INDEX CALCULATION
+// ==========================================
+test('calculateNodeAutonomyIndex computes confidence score from historical success rate and p95 latency', () => {
+  const highPerformingNode = {
+    ...INITIAL_NODES[0],
+    status: 'completed' as const,
+    operationalState: 'HECHO' as const,
+    metrics: {
+      ...INITIAL_NODES[0].metrics,
+      successCount: 180,
+      errorCount: 0,
+      p95LatencyMs: 95,
+    },
+  };
+
+  const degradedNode = {
+    ...INITIAL_NODES[0],
+    status: 'error' as const,
+    operationalState: 'EN PRUEBA' as const,
+    metrics: {
+      ...INITIAL_NODES[0].metrics,
+      successCount: 8,
+      errorCount: 6,
+      p95LatencyMs: 2100,
+    },
+  };
+
+  const highAutonomy = calculateNodeAutonomyIndex(highPerformingNode);
+  const lowAutonomy = calculateNodeAutonomyIndex(degradedNode);
+
+  assert.ok(highAutonomy.confidenceScore >= 88);
+  assert.equal(highAutonomy.autonomyLevel, 'autonomous_l5');
+  assert.equal(highAutonomy.successRatePercent, 100);
+
+  assert.ok(lowAutonomy.confidenceScore < 60);
+  assert.equal(lowAutonomy.autonomyLevel, 'human_in_loop_l2');
+  assert.ok(highAutonomy.confidenceScore > lowAutonomy.confidenceScore);
+});
+
+// ==========================================
+// TEST LIVE LATENCY TRACKER & SPARKLINE ENGINE
+// ==========================================
+test('calculateNodeLatencyTracker compares current execution vs historical average and detects latency spikes', () => {
+  const baseNode = INITIAL_NODES.find((n) => n.id === 'spec_writer') || INITIAL_NODES[0];
+  const nominalTracker = calculateNodeLatencyTracker(baseNode, 0, 0);
+
+  assert.equal(nominalTracker.samples.length, 16);
+  assert.ok(nominalTracker.historicalAvgMs > 0);
+  assert.ok(nominalTracker.currentExecutionMs > 0);
+  assert.equal(
+    nominalTracker.deltaMs,
+    nominalTracker.currentExecutionMs - nominalTracker.historicalAvgMs
+  );
+
+  // Simular un pico severo de latencia (+450ms)
+  const spikedTracker = calculateNodeLatencyTracker(baseNode, 0, 450);
+  assert.ok(spikedTracker.currentExecutionMs > nominalTracker.currentExecutionMs);
+  assert.equal(spikedTracker.status, 'spike_detected');
+  assert.ok(spikedTracker.samples[spikedTracker.samples.length - 1].isSpike);
+  assert.ok(spikedTracker.spikeCount >= 1);
+});
+
+// ==========================================
+// TEST PROACTIVE HEALTH MONITOR & DRIFT DETECTION
+// ==========================================
+test('analyzeTelemetryDrift detects error and latency drift, generates auto-logs, and suggests node for investigation', () => {
+  const dummyTasks = [
+    createPipelineTask({ title: 'Drift Task', lane: 'standard', priority: 'P1_HIGH', description: 'Drift check' }),
+  ];
+
+  const nodesWithDrift = INITIAL_NODES.map((n) =>
+    n.id === 'verificador'
+      ? {
+          ...n,
+          status: 'error' as const,
+          metrics: {
+            ...n.metrics,
+            errorCount: 3,
+            p95LatencyMs: 980,
+          },
+        }
+      : n
+  );
+
+  const report = analyzeTelemetryDrift(nodesWithDrift, dummyTasks, 0);
+  assert.equal(report.nodesScanned, INITIAL_NODES.length);
+  assert.equal(report.status, 'critical_alert');
+  assert.ok(report.activeAlerts.length > 0);
+  assert.ok(report.topSuggestedNodeId);
+  assert.ok(report.generatedLogs.length > 0);
+  assert.equal(report.generatedLogs[0].source, 'Proactive Health Monitor');
+  assert.ok(
+    report.activeAlerts.some(
+      (a) => a.nodeId === 'verificador' && a.driftType === 'error_frequency_drift'
+    )
+  );
+});
+
+// ==========================================
+// TEST AGENT CHAOS MODE (PROBABILISTIC NON-DETERMINISTIC ENGINE)
+// ==========================================
+import { DEFAULT_AGENT_CHAOS_CONFIG, generateProbabilisticChaosPerturbations } from './simulation';
+
+test('Agent Chaos Mode injects probabilistic non-deterministic latency and intermittent failures into sandbox nodes', () => {
+  const activeChaosConfig = {
+    ...DEFAULT_AGENT_CHAOS_CONFIG,
+    enabled: true,
+    failureProbabilityPercent: 65,
+    artificialLatencyJitterMs: 900,
+    pattern: 'cascading_degradation' as const,
+    seed: 99,
+  };
+
+  const perturbations = generateProbabilisticChaosPerturbations(INITIAL_NODES, activeChaosConfig);
+  assert.ok(perturbations.length > 0);
+  assert.ok(perturbations.every((p) => p.injectedLatencyMs > 0));
+  assert.ok(perturbations.some((p) => p.intermittentFailureTriggered));
+
+  const scenario = PRESET_SIMULATION_SCENARIOS[0];
+  const baselineResult = runSandboxSimulation(scenario, INITIAL_NODES);
+  const chaosResult = runSandboxSimulation(scenario, INITIAL_NODES, activeChaosConfig);
+
+  assert.equal(chaosResult.chaosModeActive, true);
+  assert.ok(chaosResult.chaosPerturbations && chaosResult.chaosPerturbations.length > 0);
+  assert.ok(chaosResult.durationMs > baselineResult.durationMs);
+});
 
 
+// ==========================================
+// TEST BATCH SIMULATION ENGINE (SCALED THROUGHPUT STRESS-TESTING)
+// ==========================================
+import {
+  DEFAULT_BATCH_QUEUE_PRESETS,
+  runBatchScenarioSimulation,
+} from './simulation';
 
+test('Batch simulation engine executes queued scenarios with varied parameters and calculates aggregate throughput', () => {
+  const batchQueue = [
+    {
+      ...DEFAULT_BATCH_QUEUE_PRESETS[0],
+      concurrencyLevel: 3,
+    },
+    {
+      ...DEFAULT_BATCH_QUEUE_PRESETS[1],
+      concurrencyLevel: 5,
+      customOverrides: { networkLatencyMs: 350 },
+    },
+  ];
+
+  const summary = runBatchScenarioSimulation(batchQueue, INITIAL_NODES);
+
+  assert.ok(summary.batchId.startsWith('BATCH-'));
+  assert.equal(summary.totalScenarios, 2);
+  assert.equal(summary.completedCount + summary.failedCount + summary.healedCount + summary.quarantinedCount, 2);
+  assert.ok(summary.peakThroughputTasksPerMin > 0);
+  assert.ok(summary.aggregateTokensConsumed > 0);
+  assert.equal(summary.results.length, 2);
+  assert.ok(summary.results[0].durationMs > 0);
+  assert.ok(summary.results[1].durationMs > 0);
+});
+
+// ==========================================
+// TEST TASK DEPENDENCY GRAPH (DAG WORKFLOW & PARALLEL EXECUTION)
+// ==========================================
+import {
+  buildTaskDependencyGraph,
+  advanceDependencyTask,
+  DEFAULT_WORKFLOW_TASKS,
+} from './taskDependencies';
+
+test('Task dependency graph accurately models blocking, enabling, parallel groups, and critical path', () => {
+  const dummyLiveTasks = [
+    createPipelineTask({ title: 'Task Live', lane: 'standard', priority: 'P1_HIGH', description: 'desc' }),
+  ];
+
+  const graph = buildTaskDependencyGraph(dummyLiveTasks, INITIAL_NODES);
+
+  assert.ok(graph.tasks.length >= 10);
+  assert.ok(graph.links.length > 0);
+  assert.ok(graph.criticalPathLengthMs > 0);
+  assert.ok(graph.parallelCapacityUtilization > 0);
+  assert.ok(graph.completedTasksCount > 0);
+
+  // Verificar relación de dependencia directa: wf-task-2 depende de wf-task-1
+  const task2 = graph.tasks.find((t) => t.id === 'wf-task-2');
+  assert.ok(task2);
+  assert.ok(task2.dependsOn.includes('wf-task-1'));
+
+  // Avanzar una tarea ready a running y luego completed
+  const initialReady = graph.tasks.find((t) => t.state === 'ready');
+  if (initialReady) {
+    const step1 = advanceDependencyTask(graph.tasks, initialReady.id);
+    const updatedStep1 = step1.find((t) => t.id === initialReady.id);
+    assert.equal(updatedStep1?.state, 'running');
+
+    const step2 = advanceDependencyTask(step1, initialReady.id);
+    const updatedStep2 = step2.find((t) => t.id === initialReady.id);
+    assert.equal(updatedStep2?.state, 'completed');
+  }
+});
+
+// ==========================================
+// TEST SYSTEM SNAPSHOTS & DISASTER RECOVERY SERVICE
+// ==========================================
+import {
+  createSystemSnapshot,
+  computeGraphChecksum,
+  SystemSnapshotsStorage,
+} from './snapshots';
+
+test('SystemSnapshots service creates valid 10m periodic snapshots with checksum and handles disaster recovery', () => {
+  const dummyState = {
+    nodes: INITIAL_NODES,
+    edges: INITIAL_EDGES,
+    tasks: [
+      createPipelineTask({ title: 'Task Snap', lane: 'standard', priority: 'P1_HIGH', description: 'Snapshot test' }),
+    ],
+    telemetry: calculateTelemetry([], INITIAL_NODES),
+    activityLogs: [],
+    activeTaskId: 'TASK-HOTFIX-P0',
+    engineStatus: 'running' as const,
+    engineSpeed: 1,
+  };
+
+  const checksum = computeGraphChecksum(dummyState.nodes, dummyState.edges);
+  assert.ok(checksum.startsWith('CHK-'));
+
+  const snapshot = createSystemSnapshot(dummyState, {
+    triggerType: 'cron_10m',
+    triggerReason: 'Prueba unitaria de cron de 10 min',
+  });
+
+  assert.ok(snapshot.id.startsWith('SNAP-'));
+  assert.equal(snapshot.triggerType, 'cron_10m');
+  assert.equal(snapshot.totalNodes, INITIAL_NODES.length);
+  assert.equal(snapshot.totalEdges, INITIAL_EDGES.length);
+  assert.equal(snapshot.graphChecksum, checksum);
+  assert.ok(snapshot.globalHealthScore >= 0);
+  assert.equal(snapshot.statePayload.nodes.length, INITIAL_NODES.length);
+
+  // Almacenamiento en tabla SystemSnapshots
+  const storage = new SystemSnapshotsStorage();
+  storage.saveSnapshot(snapshot);
+  assert.equal(storage.count(), 1);
+
+  const retrieved = storage.getById(snapshot.id);
+  assert.ok(retrieved);
+  assert.equal(retrieved.id, snapshot.id);
+
+  const latest = storage.getLatest();
+  assert.equal(latest?.id, snapshot.id);
+});
+
+// ==========================================
+// TEST AGENT KNOWLEDGE BASE (SOURCE OF TRUTH)
+// ==========================================
+import {
+  getAgentKnowledgeDoc,
+  INITIAL_AGENT_KNOWLEDGE_DOCS,
+} from './agentKnowledgeBase';
+
+test('Agent Knowledge Base retrieves single source of truth markdown docs and generates fallback templates', () => {
+  // 1. Doc pre-existente estructurado
+  const brainDoc = getAgentKnowledgeDoc('brain', 'Brain', 'Master Context Controller', 'Wiki and design tokens');
+  assert.equal(brainDoc.nodeId, 'brain');
+  assert.ok(brainDoc.tags.includes('Context'));
+  assert.ok(brainDoc.markdownContent.includes('Brain Master Controller'));
+  assert.ok(brainDoc.markdownContent.includes('Claude 3.7 Sonnet'));
+
+  // 2. Doc dinámico para nodo nuevo sin registro previo
+  const customDoc = getAgentKnowledgeDoc('custom-worker', 'Custom Worker', 'Heavy Data Worker', 'Processes bulk logs');
+  assert.equal(customDoc.nodeId, 'custom-worker');
+  assert.ok(customDoc.markdownContent.includes('Custom Worker'));
+  assert.ok(customDoc.markdownContent.includes('timeoutMs: 5000'));
+});
+
+// ==========================================
+// TEST PREDICTIVE LOAD BALANCER
+// ==========================================
+import {
+  calculateLaneQueuePressures,
+  analyzePredictiveLoadBalancing,
+  applyRedistributionSuggestion,
+} from './loadBalancer';
+
+test('Predictive Load Balancer calculates lane saturation, imbalance scores and generates valid redistribution suggestions', () => {
+  // Simular una cola asimétrica: 6 tareas en 'standard' y 0 en 'express'
+  const congestedTasks = [
+    createPipelineTask({ title: 'Task S1', lane: 'standard', priority: 'P1_HIGH', description: 'test' }),
+    createPipelineTask({ title: 'Task S2', lane: 'standard', priority: 'P2_NORMAL', description: 'test' }),
+    createPipelineTask({ title: 'Task S3', lane: 'standard', priority: 'P2_NORMAL', description: 'test' }),
+    createPipelineTask({ title: 'Task S4', lane: 'standard', priority: 'P1_HIGH', description: 'test' }),
+    createPipelineTask({ title: 'Task S5', lane: 'standard', priority: 'P2_NORMAL', description: 'test' }),
+    createPipelineTask({ title: 'Task S6', lane: 'standard', priority: 'P2_NORMAL', description: 'test' }),
+  ];
+
+  const pressures = calculateLaneQueuePressures(congestedTasks, INITIAL_NODES);
+  assert.ok(pressures.standard.saturationRatio > 50);
+  assert.equal(pressures.express.status, 'underutilized');
+
+  const report = analyzePredictiveLoadBalancing(congestedTasks, INITIAL_NODES);
+  assert.ok(report.imbalanceScore > 40);
+  assert.ok(report.suggestions.length > 0);
+  assert.equal(report.suggestions[0].sourceLane, 'standard');
+  assert.equal(report.suggestions[0].suggestedTargetLane, 'express');
+  assert.ok(report.totalPotentialThroughputGainPercent > 0);
+
+  // Aplicar sugerencia
+  const redistributed = applyRedistributionSuggestion(congestedTasks, congestedTasks[0].id, 'express');
+  const targetTask = redistributed.find((t) => t.id === congestedTasks[0].id);
+  assert.equal(targetTask?.lane, 'express');
+});
+
+// ==========================================
+// TEST RESOURCE TOKEN LEDGER & SPENDING LIMIT POLICY
+// ==========================================
+import {
+  calculateResourceTokenLedger,
+  DEFAULT_SPENDING_POLICY,
+} from './tokenLedger';
+
+test('Resource Token Ledger accurately audits Agent Credits per node and detects runaway cost risks', () => {
+  const dummyTasks = [
+    createPipelineTask({ title: 'Task Heavy', lane: 'standard', priority: 'P1_HIGH', description: 'desc' }),
+  ];
+  dummyTasks[0].metrics.totalTokens = 42000; // 42 créditos (> 35 créditos de la política por defecto)
+
+  const ledger = calculateResourceTokenLedger(INITIAL_NODES, dummyTasks, DEFAULT_SPENDING_POLICY);
+
+  assert.ok(ledger.totalTokensConsumed > 0);
+  assert.ok(ledger.totalAgentCredits > 0);
+  assert.ok(ledger.totalCostUsd > 0);
+  assert.ok(ledger.nodeConsumptions.length > 0);
+  assert.ok(ledger.topConsumingNodeId);
+  assert.equal(ledger.spendingPolicy.maxCreditsPerTask, 35);
+  assert.ok(ledger.runawayRiskCount >= 1);
+  assert.ok(ledger.recentTransactions.length > 0);
+  assert.equal(ledger.recentTransactions[0].status, 'capped');
+});
+
+// ==========================================
+// TEST NODE PERFORMANCE SUMMARY (24-HOUR SUCCESS/ERROR TREND)
+// ==========================================
+import { calculateNodePerformanceSummary } from './nodePerformanceSummary';
+
+test('calculateNodePerformanceSummary computes 24-hour hourly trend points with success, error, and latency metrics', () => {
+  const testNode = { ...INITIAL_NODES[0] };
+  testNode.metrics = {
+    ...testNode.metrics,
+    successCount: 45,
+    errorCount: 3,
+    p95LatencyMs: 380,
+    executionTimeMs: 240,
+  };
+
+  const summary = calculateNodePerformanceSummary(testNode, 1700000000000);
+
+  assert.equal(summary.nodeId, testNode.id);
+  assert.equal(summary.nodeName, testNode.name);
+  assert.equal(summary.hourlyPoints.length, 24);
+  assert.ok(summary.total24hExecutions > 0);
+  assert.ok(summary.total24hSuccesses > 0);
+  assert.ok(summary.overall24hSuccessRate >= 0 && summary.overall24hSuccessRate <= 100);
+  assert.ok(summary.avgLatencyMs > 0);
+  assert.ok(summary.peakErrorHour.length > 0);
+  assert.ok(summary.peakVolumeHour.length > 0);
+  assert.ok(['optimal', 'stable', 'degrading', 'investigate'].includes(summary.trendStatus));
+  assert.ok(summary.trendMessage.length > 0);
+
+  // Verificar integridad de cada punto horario
+  const firstPoint = summary.hourlyPoints[0];
+  assert.equal(typeof firstPoint.hour, 'string');
+  assert.ok(firstPoint.totalExecutions >= firstPoint.successCount + firstPoint.errorCount);
+  assert.ok(firstPoint.successRate >= 0 && firstPoint.successRate <= 100);
+  assert.ok(firstPoint.avgLatencyMs > 0);
+});

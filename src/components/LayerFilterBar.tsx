@@ -20,6 +20,7 @@ import {
   TrendingUp,
   Cpu,
   Thermometer,
+  GitMerge,
 } from 'lucide-react';
 import { NodeLayer, TaskLane } from '../types/pipeline';
 import { LAYER_INFO } from '../pipeline/graphData';
@@ -27,6 +28,7 @@ import { LAYER_INFO } from '../pipeline/graphData';
 export type ActiveTab =
   | 'canvas'
   | 'board'
+  | 'dependencies'
   | 'artifacts'
   | 'vcs'
   | 'simulation'
@@ -75,6 +77,18 @@ export const LayerFilterBar: React.FC<LayerFilterBarProps> = ({
         >
           <Network className="w-3.5 h-3.5 text-cyan-400" />
           <span>Lienzo de Nodos</span>
+        </button>
+
+        <button
+          onClick={() => onTabChange('dependencies')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition shrink-0 ${
+            activeTab === 'dependencies'
+              ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <GitMerge className="w-3.5 h-3.5 text-purple-400" />
+          <span>Dependencias (DAG)</span>
         </button>
 
         <button
@@ -181,124 +195,113 @@ export const LayerFilterBar: React.FC<LayerFilterBarProps> = ({
             </button>
           )}
 
-          <div className="h-4 w-px bg-slate-800" />
-
-          {/* Layer Filter */}
-          <div className="flex items-center gap-1 text-[11px]">
-            <span className="text-slate-500 flex items-center gap-1 mr-1">
-              <Layers className="w-3 h-3" /> Capas:
+          {/* Layer Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-950 px-2 py-1 rounded-md border border-slate-800">
+            <span className="text-slate-500 flex items-center gap-1">
+              <Layers className="w-3 h-3 text-cyan-400" /> Capas:
             </span>
             <button
               onClick={() => onSelectLayer(null)}
-              className={`px-2 py-1 rounded transition border ${
+              className={`px-2 py-0.5 rounded text-[11px] transition ${
                 selectedLayer === null
-                  ? 'bg-slate-700 text-white border-slate-500 font-bold'
-                  : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                  ? 'bg-slate-800 text-white font-bold'
+                  : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               Todas
             </button>
-            {([1, 2, 3, 4, 5] as NodeLayer[]).map((layer) => {
-              const info = LAYER_INFO[layer];
-              const isSelected = selectedLayer === layer;
-              return (
-                <button
-                  key={layer}
-                  onClick={() => onSelectLayer(isSelected ? null : layer)}
-                  style={{
-                    borderColor: isSelected ? info.color : 'rgba(51, 65, 85, 0.4)',
-                    color: isSelected ? info.color : '#94a3b8',
-                    backgroundColor: isSelected ? info.bg : 'rgba(2, 6, 23, 0.7)',
-                  }}
-                  className="px-2 py-1 rounded transition border font-semibold"
-                  title={info.subtitle}
-                >
-                  C{layer}
-                </button>
-              );
-            })}
+            {([1, 2, 3, 4, 5] as NodeLayer[]).map((layer) => (
+              <button
+                key={layer}
+                onClick={() => onSelectLayer(selectedLayer === layer ? null : layer)}
+                className={`px-2 py-0.5 rounded text-[11px] transition font-bold ${
+                  selectedLayer === layer
+                    ? 'text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                style={{
+                  backgroundColor:
+                    selectedLayer === layer ? LAYER_INFO[layer].color : 'transparent',
+                }}
+              >
+                C{layer}
+              </button>
+            ))}
           </div>
 
-          <div className="h-4 w-px bg-slate-800" />
-
-          {/* Lane Filter */}
-          <div className="flex items-center gap-1 text-[11px]">
-            <span className="text-slate-500 flex items-center gap-1 mr-1">
-              <Filter className="w-3 h-3" /> Carril:
+          {/* Lane Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-950 px-2 py-1 rounded-md border border-slate-800">
+            <span className="text-slate-500 flex items-center gap-1">
+              <Filter className="w-3 h-3 text-amber-400" /> Carril:
             </span>
             <button
               onClick={() => onSelectLane('all')}
-              className={`px-2 py-1 rounded transition border ${
+              className={`px-2 py-0.5 rounded text-[11px] transition ${
                 selectedLane === 'all'
-                  ? 'bg-slate-700 text-white border-slate-500 font-bold'
-                  : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                  ? 'bg-slate-800 text-white font-bold'
+                  : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               Todos
             </button>
             <button
               onClick={() => onSelectLane('standard')}
-              className={`flex items-center gap-1 px-2 py-1 rounded transition border ${
+              className={`px-2 py-0.5 rounded text-[11px] transition flex items-center gap-1 ${
                 selectedLane === 'standard'
-                  ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
-                  : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                  ? 'bg-blue-600/30 text-blue-300 font-bold border border-blue-500/40'
+                  : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Shield className="w-3 h-3 text-cyan-400" /> Estándar
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+              <span>Estándar</span>
             </button>
             <button
               onClick={() => onSelectLane('express')}
-              className={`flex items-center gap-1 px-2 py-1 rounded transition border ${
+              className={`px-2 py-0.5 rounded text-[11px] transition flex items-center gap-1 ${
                 selectedLane === 'express'
-                  ? 'bg-amber-950 border-amber-500 text-amber-300 font-bold'
-                  : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                  ? 'bg-amber-600/30 text-amber-300 font-bold border border-amber-500/40'
+                  : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Zap className="w-3 h-3 text-amber-400" /> Express
+              <Zap className="w-3 h-3 text-amber-400" />
+              <span>Express</span>
             </button>
             <button
               onClick={() => onSelectLane('urgent')}
-              className={`flex items-center gap-1 px-2 py-1 rounded transition border ${
+              className={`px-2 py-0.5 rounded text-[11px] transition flex items-center gap-1 ${
                 selectedLane === 'urgent'
-                  ? 'bg-rose-950 border-rose-500 text-rose-300 font-bold'
-                  : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                  ? 'bg-rose-600/30 text-rose-300 font-bold border border-rose-500/40'
+                  : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Flame className="w-3 h-3 text-rose-400" /> Urgente P0
+              <Flame className="w-3 h-3 text-rose-400" />
+              <span>Urgente P0</span>
             </button>
           </div>
 
-          <div className="h-4 w-px bg-slate-800" />
-
-          {/* Canvas Zoom Controls */}
-          <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded border border-slate-800">
-            {onZoomIn && (
-              <button
-                onClick={onZoomIn}
-                className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded transition"
-                title="Acercar (Zoom In)"
-              >
-                <ZoomIn className="w-3.5 h-3.5" />
-              </button>
-            )}
-            {onZoomOut && (
-              <button
-                onClick={onZoomOut}
-                className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded transition"
-                title="Alejar (Zoom Out)"
-              >
-                <ZoomOut className="w-3.5 h-3.5" />
-              </button>
-            )}
-            {onFitView && (
-              <button
-                onClick={onFitView}
-                className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded transition"
-                title="Ajustar al Lienzo"
-              >
-                <Maximize2 className="w-3.5 h-3.5" />
-              </button>
-            )}
+          {/* Zoom & Fit Controls */}
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-md border border-slate-800">
+            <button
+              onClick={onZoomIn}
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              title="Acercar (Zoom In)"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={onZoomOut}
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              title="Alejar (Zoom Out)"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={onFitView}
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              title="Ajustar al Lienzo"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       )}

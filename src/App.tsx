@@ -11,6 +11,7 @@ import { LayerFilterBar, ActiveTab } from './components/LayerFilterBar';
 import { NodeGraphCanvas } from './components/NodeGraphCanvas';
 import { NodeInspectorModal } from './components/NodeInspectorModal';
 import { TaskQueueDrawer } from './components/TaskQueueDrawer';
+import { TaskDependencyGraphView } from './components/TaskDependencyGraphView';
 import { ArtifactViewerModal } from './components/ArtifactViewerModal';
 import { NewTaskModal } from './components/NewTaskModal';
 import { ArchitectureDocsModal } from './components/ArchitectureDocsModal';
@@ -22,6 +23,13 @@ import { ThroughputProjectionPanel } from './components/ThroughputProjectionPane
 import { ExportReportModal } from './components/ExportReportModal';
 import { DevOnboardingModal } from './components/DevOnboardingModal';
 import { ResourceAllocationModal } from './components/ResourceAllocationModal';
+import { DisasterRecoveryModal } from './components/DisasterRecoveryModal';
+import { PredictiveLoadBalancerModal } from './components/PredictiveLoadBalancerModal';
+import { GlobalSearchModal } from './components/GlobalSearchModal';
+import { ResourceTokenLedgerModal } from './components/ResourceTokenLedgerModal';
+import { DEFAULT_SPENDING_POLICY } from './pipeline/tokenLedger';
+import { TaskSpendingLimitPolicy } from './types/pipeline';
+import { ProactiveHealthMonitorBar } from './components/ProactiveHealthMonitorBar';
 import {
   PipelineNode,
   PipelineTask,
@@ -44,6 +52,7 @@ import {
   DEFAULT_LANE_BUDGETS,
   calculateAgentDensityMap,
   calculateLaneResourceConsumption,
+  analyzeTelemetryDrift,
 } from './pipeline/resourceManager';
 import { Sparkles } from 'lucide-react';
 
@@ -64,6 +73,7 @@ export default function App() {
     setSpeedMultiplier,
     createTask,
     injectFault,
+    appendActivityLogs,
   } = usePipelineSocket();
 
   // Estados de interfaz
@@ -76,6 +86,11 @@ export default function App() {
   const [heatmapEnabled, setHeatmapEnabled] = useState<boolean>(true);
   const [laneBudgets, setLaneBudgets] = useState<Record<TaskLane, LaneBudgetCap>>(DEFAULT_LANE_BUDGETS);
 
+  // Monitor Proactivo de Salud en Segundo Plano (Proactive Health Monitor)
+  const [isHealthMonitoring, setIsHealthMonitoring] = useState<boolean>(true);
+  const [healthScanTick, setHealthScanTick] = useState<number>(0);
+  const loggedDriftSignatureRef = useRef<string>('');
+
   // Sistema de Control de Versiones (Agent VCS)
   const [vcsState, setVcsState] = useState(() => getInitialBranchesAndCommits(nodes));
   const [currentBranch, setCurrentBranch] = useState<string>('main');
@@ -87,6 +102,23 @@ export default function App() {
   const [isArchitectureModalOpen, setIsArchitectureModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isTourModalOpen, setIsTourModalOpen] = useState(false);
+  const [isDisasterRecoveryModalOpen, setIsDisasterRecoveryModalOpen] = useState(false);
+  const [isLoadBalancerModalOpen, setIsLoadBalancerModalOpen] = useState(false);
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [isLedgerModalOpen, setIsLedgerModalOpen] = useState(false);
+  const [spendingPolicy, setSpendingPolicy] = useState<TaskSpendingLimitPolicy>(DEFAULT_SPENDING_POLICY);
+
+  // Atajo de teclado global ⌘K / Ctrl+K para Búsqueda Global
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchModalOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Zoom y Paneo del Canvas
   const [zoomLevel, setZoomLevel] = useState(0.85);
@@ -164,6 +196,51 @@ export default function App() {
     [activeNodes, tasks, laneBudgets, speed]
   );
 
+  // Reporte reactivo del Monitor Proactivo de Salud en Segundo Plano
+  const proactiveHealthReport = useMemo(
+    () => analyzeTelemetryDrift(activeNodes, tasks, healthScanTick),
+    [activeNodes, tasks, healthScanTick]
+  );
+
+  // Tarea en segundo plano (Daemon) que escanea deriva de telemetría periódicamente
+  useEffect(() => {
+    if (!isHealthMonitoring) return;
+    const interval = setInterval(() => {
+      setHealthScanTick((t) => t + 1);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [isHealthMonitoring]);
+
+  // Emisión automática de logs cuando el Proactive Health Monitor detecta una nueva deriva crítica o cambio en errores
+  useEffect(() => {
+    if (!isHealthMonitoring) return;
+    const signature = proactiveHealthReport.activeAlerts
+      .slice(0, 3)
+      .map((a) => `${a.nodeId}:${a.driftType}:${a.severity}`)
+      .join('|');
+
+    if (signature && signature !== loggedDriftSignatureRef.current) {
+      loggedDriftSignatureRef.current = signature;
+      if (proactiveHealthReport.generatedLogs.length > 0) {
+        appendActivityLogs([proactiveHealthReport.generatedLogs[0]]);
+      }
+    }
+  }, [isHealthMonitoring, proactiveHealthReport, appendActivityLogs]);
+
+  const handleForceHealthScanAndLog = () => {
+    setHealthScanTick((t) => t + 1);
+    if (proactiveHealthReport.generatedLogs.length > 0) {
+      appendActivityLogs(proactiveHealthReport.generatedLogs.slice(0, 2));
+    }
+  };
+
+  const handleInvestigateNode = (nodeId: string) => {
+    const target = activeNodes.find((n) => n.id === nodeId);
+    if (target) {
+      setInspectedNode(target);
+    }
+  };
+
   const handleUpdateLaneBudget = (lane: TaskLane, updated: Partial<LaneBudgetCap>) => {
     setLaneBudgets((prev) => ({
       ...prev,
@@ -224,6 +301,10 @@ export default function App() {
         onOpenThroughput={() => setActiveTab('throughput')}
         onOpenExport={() => setIsExportModalOpen(true)}
         onOpenTour={() => setIsTourModalOpen(true)}
+        onOpenDisasterRecovery={() => setIsDisasterRecoveryModalOpen(true)}
+        onOpenLoadBalancer={() => setIsLoadBalancerModalOpen(true)}
+        onOpenSearch={() => setIsSearchModalOpen(true)}
+        onOpenLedger={() => setIsLedgerModalOpen(true)}
         laneConsumption={laneConsumption}
         onOpenResources={() => setActiveTab('resources')}
       />
@@ -300,6 +381,13 @@ export default function App() {
               onToggleHeatmap={() => setHeatmapEnabled((v) => !v)}
               densityMap={densityMap}
             />
+          </div>
+        )}
+
+        {/* PESTAÑA: GRAFO DE DEPENDENCIAS DE TAREAS (DAG) */}
+        {activeTab === 'dependencies' && (
+          <div className="h-full overflow-hidden flex-1 flex flex-col">
+            <TaskDependencyGraphView tasks={tasks} nodes={nodes} />
           </div>
         )}
 
@@ -427,12 +515,25 @@ export default function App() {
         )}
       </main>
 
+      {/* 3.5 Monitor Proactivo de Salud en Segundo Plano (Proactive Health Monitor) */}
+      <ProactiveHealthMonitorBar
+        report={proactiveHealthReport}
+        isMonitoring={isHealthMonitoring}
+        onToggleMonitoring={() => setIsHealthMonitoring((v) => !v)}
+        onForceScanAndLog={handleForceHealthScanAndLog}
+        onInvestigateNode={handleInvestigateNode}
+      />
+
       {/* 4. Consola de Registro de Actividad Inferior */}
       <ActivityLogStream logs={activityLogs} />
 
       {/* 5. Modales Emergentes */}
       <NodeInspectorModal
-        node={inspectedNode}
+        node={
+          inspectedNode
+            ? activeNodes.find((n) => n.id === inspectedNode.id) || inspectedNode
+            : null
+        }
         tasks={tasks}
         logs={activityLogs}
         onClose={() => setInspectedNode(null)}
@@ -476,6 +577,72 @@ export default function App() {
       />
 
       {/* 7. Modal de Onboarding y Tour Interactivo para Desarrolladores */}
+      <ResourceTokenLedgerModal
+        nodes={activeNodes}
+        tasks={tasks}
+        isOpen={isLedgerModalOpen}
+        onClose={() => setIsLedgerModalOpen(false)}
+        currentPolicy={spendingPolicy}
+        onUpdatePolicy={(newPolicy) => {
+          setSpendingPolicy(newPolicy);
+          appendActivityLogs([
+            {
+              id: "ledger-log-" + Date.now(),
+              timestamp: Date.now(),
+              level: "info",
+              source: "Resource Token Ledger",
+              layer: 5,
+              message: "[SPENDING LIMIT] Política actualizada: máx " + newPolicy.maxCreditsPerTask + " créditos/tarea ($" + newPolicy.maxCostUsdPerTask + "). Acción: " + newPolicy.actionOnLimitExceeded.toUpperCase() + ".",
+            },
+          ]);
+        }}
+      />
+
+      <GlobalSearchModal
+        nodes={activeNodes}
+        tasks={tasks}
+        logs={activityLogs}
+        isOpen={isSearchModalOpen}
+        onClose={() => setIsSearchModalOpen(false)}
+        onSelectNode={(node) => setInspectedNode(node)}
+        onSelectTask={(task) => {
+          const targetNode = activeNodes.find((n) => n.id === task.currentNodeId);
+          if (targetNode) setInspectedNode(targetNode);
+          else setActiveTab('board');
+        }}
+      />
+
+      <PredictiveLoadBalancerModal
+        tasks={tasks}
+        nodes={nodes}
+        isOpen={isLoadBalancerModalOpen}
+        onClose={() => setIsLoadBalancerModalOpen(false)}
+        onApplyRedistribution={(taskId, targetLane) => {
+          const targetTask = tasks.find((t) => t.id === taskId);
+          if (targetTask) {
+            targetTask.lane = targetLane;
+            appendActivityLogs([
+              {
+                id: "bal-log-" + Date.now(),
+                timestamp: Date.now(),
+                level: "success",
+                source: "Predictive Load Balancer",
+                layer: 4,
+                message: "[PREDICTIVE BALANCE] Tarea [" + targetTask.id + "] redistribuida al carril " + targetLane.toUpperCase() + " para optimizar throughput.",
+              },
+            ]);
+          }
+        }}
+      />
+
+      <DisasterRecoveryModal
+        isOpen={isDisasterRecoveryModalOpen}
+        onClose={() => setIsDisasterRecoveryModalOpen(false)}
+        onRestoreSuccess={() => {
+          resetPipeline();
+        }}
+      />
+
       <DevOnboardingModal
         isOpen={isTourModalOpen}
         onClose={() => setIsTourModalOpen(false)}

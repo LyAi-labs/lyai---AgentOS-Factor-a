@@ -1,3 +1,8 @@
+import {
+  SystemSnapshotsStorage,
+  createSystemSnapshot,
+  SystemSnapshotRecord,
+} from './src/pipeline/snapshots';
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -158,6 +163,56 @@ function restartTickTimer() {
 // Iniciar tick loop
 restartTickTimer();
 
+// ==========================================
+// SERVICIO DE CRON-JOB: TABLA 'SystemSnapshots' (CADA 10 MIN)
+// ==========================================
+const systemSnapshotsStorage = new SystemSnapshotsStorage();
+const SNAPSHOT_CRON_INTERVAL_MS = 10 * 60 * 1000; // 10 minutos exactos
+let snapshotCronTimer: NodeJS.Timeout | null = null;
+let lastSnapshotTakenAt: number = Date.now();
+
+function takeSystemSnapshot(triggerType: 'cron_10m' | 'manual' | 'pre_disaster' | 'state_rollback' = 'cron_10m', reason?: string): SystemSnapshotRecord {
+  const telemetry = calculateTelemetry(currentTasks, currentNodes);
+  const snapshot = createSystemSnapshot(
+    {
+      nodes: currentNodes,
+      edges: currentEdges,
+      tasks: currentTasks,
+      telemetry,
+      activityLogs,
+      activeTaskId,
+      engineStatus,
+      engineSpeed,
+    },
+    {
+      triggerType,
+      triggerReason: reason,
+      now: Date.now(),
+    }
+  );
+
+  systemSnapshotsStorage.saveSnapshot(snapshot);
+  lastSnapshotTakenAt = snapshot.timestamp;
+
+  addLog({
+    level: 'info',
+    source: 'Disaster Recovery Daemon',
+    layer: 5,
+    message: `[SystemSnapshots] Instantánea ${snapshot.id} guardada (${snapshot.triggerType}). Integridad: ${snapshot.graphChecksum}. Salud: ${snapshot.globalHealthScore}%.`,
+  });
+
+  return snapshot;
+}
+
+// Tomar la primera instantánea de arranque para tener siempre un punto de recuperación base
+takeSystemSnapshot('cron_10m', 'Instantánea inicial de arranque del servidor para recuperación ante desastres');
+
+// Inicializar el cron-job en background que ejecuta cada 10 minutos
+snapshotCronTimer = setInterval(() => {
+  takeSystemSnapshot('cron_10m', 'Instantánea automática programada de cron-job (10 min)');
+}, SNAPSHOT_CRON_INTERVAL_MS);
+
+
 // WebSocket handlers
 wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ type: 'INIT_STATE', data: getFullState() }));
@@ -209,6 +264,71 @@ wss.on('connection', (ws) => {
 });
 
 // REST API Endpoints
+// ==========================================
+// ENDPOINTS DE RECUPERACIÓN ANTE DESASTRES Y SNAPSHOTS
+// ==========================================
+app.get('/api/snapshots', (_req, res) => {
+  res.json({
+    cronIntervalMinutes: 10,
+    cronIntervalMs: SNAPSHOT_CRON_INTERVAL_MS,
+    autoCronActive: true,
+    lastSnapshotTakenAt,
+    nextScheduledSnapshotAt: lastSnapshotTakenAt + SNAPSHOT_CRON_INTERVAL_MS,
+    totalSnapshots: systemSnapshotsStorage.count(),
+    snapshots: systemSnapshotsStorage.getAll(),
+  });
+});
+
+app.get('/api/snapshots/latest', (_req, res) => {
+  const latest = systemSnapshotsStorage.getLatest();
+  if (!latest) {
+    return res.status(404).json({ error: 'No hay instantáneas guardadas todavía' });
+  }
+  res.json(latest);
+});
+
+app.post('/api/snapshots/trigger', (req, res) => {
+  const { reason } = req.body || {};
+  const snapshot = takeSystemSnapshot('manual', reason || 'Instantánea manual solicitada por operador');
+  broadcastState();
+  res.status(201).json({ success: true, snapshot });
+});
+
+app.post('/api/snapshots/restore/:id', (req, res) => {
+  const { id } = req.params;
+  const snapshot = systemSnapshotsStorage.getById(id);
+  if (!snapshot) {
+    return res.status(404).json({ error: `Instantánea con id ${id} no encontrada en SystemSnapshots` });
+  }
+
+  // Tomar una instantánea de salvaguarda pre-disaster antes del rollback
+  takeSystemSnapshot('pre_disaster', `Salvaguarda automática antes de restaurar instantánea ${id}`);
+
+  // Restaurar estado global desde el payload de la instantánea
+  currentNodes = JSON.parse(JSON.stringify(snapshot.statePayload.nodes));
+  currentEdges = JSON.parse(JSON.stringify(snapshot.statePayload.edges));
+  currentTasks = JSON.parse(JSON.stringify(snapshot.statePayload.tasks));
+  activeTaskId = snapshot.statePayload.activeTaskId;
+  engineStatus = snapshot.statePayload.engineStatus;
+  engineSpeed = snapshot.statePayload.engineSpeed || 1;
+
+  addLog({
+    level: 'warn',
+    source: 'Disaster Recovery Daemon',
+    layer: 5,
+    message: `[SystemSnapshots] Instantánea ${snapshot.id} guardada (${snapshot.triggerType}). Integridad: ${snapshot.graphChecksum}. Salud: ${snapshot.globalHealthScore}%.`,
+  });
+
+  restartTickTimer();
+  broadcastState();
+
+  res.json({
+    success: true,
+    message: `[SystemSnapshots ROLLBACK] Estado restaurado desde instantánea ${snapshot.id} (${snapshot.isoDate}).`,
+    restoredSnapshot: snapshot,
+  });
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
