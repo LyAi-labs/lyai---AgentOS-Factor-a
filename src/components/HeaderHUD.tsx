@@ -136,86 +136,88 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
             </div>
           </div>
 
-          {/* Telemetry Metrics Badges */}
-          <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto w-full md:w-auto py-1 px-1 bg-slate-900/60 border border-slate-800 rounded-lg text-xs font-mono">
+          {/* Telemetry Metrics Badges (Sin barra de desplazamiento horizontal) */}
+          <div
+            data-testid="header-kpi-strip"
+            className="flex flex-wrap items-center gap-1.5 sm:gap-2.5 py-1 px-2 bg-slate-900/70 border border-slate-800 rounded-lg text-xs font-mono"
+          >
             {/* Active Tasks */}
-            <div className="flex items-center gap-1.5 px-2 py-1">
-              <Activity className="w-3.5 h-3.5 text-cyan-400" />
-              <div className="flex flex-col">
-                <span className="text-[9px] text-slate-400 uppercase tracking-wider">Activas</span>
-                <span className="font-bold text-cyan-300">{telemetry.activeTasksCount} tareas</span>
+            <div className="flex items-center gap-1.5 px-1.5 py-0.5">
+              <Activity className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <div className="flex flex-col leading-tight">
+                <span className="text-[8.5px] text-slate-400 uppercase tracking-wider">Activas</span>
+                <span className="font-bold text-cyan-300 whitespace-nowrap">{telemetry.activeTasksCount} tareas</span>
               </div>
             </div>
 
-            <div className="h-6 w-px bg-slate-800" />
+            <div className="h-5 w-px bg-slate-800 hidden sm:block" />
 
             {/* Success Rate */}
-            <div className="flex items-center gap-1.5 px-2 py-1">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              <div className="flex flex-col">
-                <span className="text-[9px] text-slate-400 uppercase tracking-wider">Éxito</span>
-                <span className="font-bold text-emerald-300">{telemetry.globalSuccessRate}%</span>
+            <div className="flex items-center gap-1.5 px-1.5 py-0.5">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <div className="flex flex-col leading-tight">
+                <span className="text-[8.5px] text-slate-400 uppercase tracking-wider">Éxito</span>
+                <span className="font-bold text-emerald-300 whitespace-nowrap">{telemetry.globalSuccessRate}%</span>
               </div>
             </div>
 
-            <div className="h-6 w-px bg-slate-800" />
+            <div className="h-5 w-px bg-slate-800 hidden sm:block" />
 
             {/* Cycle Time */}
-            <div className="flex items-center gap-1.5 px-2 py-1">
-              <Clock className="w-3.5 h-3.5 text-indigo-400" />
-              <div className="flex flex-col">
-                <span className="text-[9px] text-slate-400 uppercase tracking-wider">Ciclo p95</span>
-                <span className="font-bold text-indigo-300">{(telemetry.p95CycleTimeMs / 1000).toFixed(1)}s</span>
+            <div className="flex items-center gap-1.5 px-1.5 py-0.5">
+              <Clock className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+              <div className="flex flex-col leading-tight">
+                <span className="text-[8.5px] text-slate-400 uppercase tracking-wider">Ciclo p95</span>
+                <span className="font-bold text-indigo-300 whitespace-nowrap">{(telemetry.p95CycleTimeMs / 1000).toFixed(1)}s</span>
               </div>
             </div>
 
-            <div className="h-6 w-px bg-slate-800" />
+            <div className="h-5 w-px bg-slate-800 hidden sm:block" />
 
             {/* Resource Token Ledger Interactive Button */}
             <button
               onClick={onOpenLedger}
               data-testid="header-token-ledger-btn"
-              className="flex items-center gap-1.5 px-2 py-1 hover:bg-purple-500/10 rounded transition text-left cursor-pointer group"
+              className="flex items-center gap-1.5 px-1.5 py-0.5 hover:bg-purple-500/10 rounded transition text-left cursor-pointer group"
               title="Abrir Libro Mayor de Tokens (Resource Token Ledger) y Configurar Límites de Gasto por Tarea"
             >
               <Coins className="w-3.5 h-3.5 text-purple-400 group-hover:scale-110 transition shrink-0" />
-              <div className="flex flex-col">
-                <span className="text-[9px] text-purple-400 uppercase tracking-wider font-bold">Agent Credits / Costo</span>
-                <span className="font-bold text-purple-200">
-                  {(telemetry.totalTokensUsed / 1000).toFixed(0)} cr <span className="text-slate-400 text-[10px]">(${telemetry.estimatedCostUsd})</span>
+              <div className="flex flex-col leading-tight">
+                <span className="text-[8.5px] text-purple-400 uppercase tracking-wider font-bold">Agent Credits</span>
+                <span className="font-bold text-purple-200 whitespace-nowrap">
+                  {(telemetry.totalTokensUsed / 1000).toFixed(0)} cr <span className="text-slate-400 text-[9.5px]">(${telemetry.estimatedCostUsd})</span>
                 </span>
               </div>
             </button>
 
-            <div className="h-6 w-px bg-slate-800" />
+            <div className="h-5 w-px bg-slate-800 hidden sm:block" />
 
             {/* D3 Throughput Badge */}
             <button
               onClick={onOpenThroughput}
-              className="flex items-center gap-1.5 px-2 py-1 hover:bg-cyan-500/10 rounded transition text-left cursor-pointer"
+              className="flex items-center gap-1.5 px-1.5 py-0.5 hover:bg-cyan-500/10 rounded transition text-left cursor-pointer"
               title="Ver panel de proyección de finalización con gráficos D3"
             >
-              <TrendingUp className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-              <div className="flex flex-col">
-                <span className="text-[9px] text-cyan-400 uppercase tracking-wider font-bold">Throughput D3</span>
-                <span className="font-bold text-cyan-200">
-                  {telemetry.throughputPerHour || 48} <span className="text-slate-400 text-[10px]">/ hora</span>
+              <TrendingUp className="w-3.5 h-3.5 text-cyan-400 animate-pulse shrink-0" />
+              <div className="flex flex-col leading-tight">
+                <span className="text-[8.5px] text-cyan-400 uppercase tracking-wider font-bold">Throughput D3</span>
+                <span className="font-bold text-cyan-200 whitespace-nowrap">
+                  {telemetry.throughputPerHour || 48} <span className="text-slate-400 text-[9.5px]">/h</span>
                 </span>
               </div>
             </button>
           </div>
 
-          {/* Global Controls & Actions */}
           {/* Global Search Quick Trigger */}
-          <div className="flex-1 max-w-xs mx-2 hidden lg:block">
+          <div className="w-48 xl:w-56 hidden lg:block">
             <button
               onClick={onOpenSearch}
               data-testid="header-global-search-btn"
-              className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800/90 border border-slate-800 text-slate-400 hover:text-slate-200 transition font-mono text-xs cursor-pointer shadow-inner"
+              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800/90 border border-slate-800 text-slate-400 hover:text-slate-200 transition font-mono text-xs cursor-pointer shadow-inner"
             >
-              <div className="flex items-center gap-2 truncate">
+              <div className="flex items-center gap-1.5 truncate">
                 <Search className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                <span className="truncate">Buscar nodos, tareas, logs...</span>
+                <span className="truncate">Buscar nodos, Rory, Guardian...</span>
               </div>
               <kbd className="px-1.5 py-0.2 rounded bg-slate-950 border border-slate-700 text-[10px] text-slate-500 font-mono shrink-0">
                 ⌘K
@@ -223,11 +225,11 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
+          <div className="flex items-center gap-1.5 w-full xl:w-auto justify-end flex-wrap">
             {/* Play/Pause */}
             <button
               onClick={engineStatus === 'running' ? onPause : onPlay}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-mono text-xs font-semibold transition border ${
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md font-mono text-xs font-semibold transition border cursor-pointer ${
                 engineStatus === 'running'
                   ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
                   : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
@@ -248,7 +250,7 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
             {/* Step Button */}
             <button
               onClick={onStep}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-slate-900 text-slate-300 border border-slate-700 hover:bg-slate-800 hover:text-white font-mono text-xs transition"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-md bg-slate-900 text-slate-300 border border-slate-700 hover:bg-slate-800 hover:text-white font-mono text-xs transition cursor-pointer"
               title="Avanzar un solo paso del pipeline"
             >
               <FastForward className="w-3.5 h-3.5 text-cyan-400" /> Paso
@@ -260,7 +262,7 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
                 <button
                   key={s}
                   onClick={() => onSetSpeed(s)}
-                  className={`px-2 py-1 rounded transition ${
+                  className={`px-1.5 py-0.5 rounded transition cursor-pointer ${
                     speed === s
                       ? 'bg-cyan-500/30 text-cyan-300 font-bold'
                       : 'text-slate-400 hover:text-slate-200'
@@ -274,7 +276,7 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
             {/* Reset */}
             <button
               onClick={onReset}
-              className="p-1.5 rounded-md bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200 hover:bg-slate-800 transition"
+              className="p-1.5 rounded-md bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200 hover:bg-slate-800 transition cursor-pointer"
               title="Reinicializar grafo y tareas"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -283,7 +285,7 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
             {/* New Task Button */}
             <button
               onClick={onOpenNewTask}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-500/20 transition active:scale-95"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-500/20 transition active:scale-95 cursor-pointer"
             >
               <PlusCircle className="w-3.5 h-3.5" /> Nueva Tarea
             </button>
@@ -291,7 +293,7 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
             {/* Architecture / Docs */}
             <button
               onClick={onOpenArchitecture}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-indigo-950/80 text-indigo-300 border border-indigo-700 hover:bg-indigo-900 font-mono text-xs font-semibold transition"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-md bg-indigo-950/80 text-indigo-300 border border-indigo-700 hover:bg-indigo-900 font-mono text-xs font-semibold transition cursor-pointer"
               title="Ver Arquitectura C.R.A.F.T., Esquema y Docker"
             >
               <FileCode2 className="w-3.5 h-3.5" /> C.R.A.F.T.
@@ -300,7 +302,7 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
             {/* Export JSON Report */}
             <button
               onClick={onOpenExport}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-emerald-950/80 text-emerald-300 border border-emerald-700 hover:bg-emerald-900 font-mono text-xs font-semibold transition cursor-pointer"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-md bg-emerald-950/80 text-emerald-300 border border-emerald-700 hover:bg-emerald-900 font-mono text-xs font-semibold transition cursor-pointer"
               title="Exportar telemetría y grafo a JSON"
             >
               <FileJson className="w-3.5 h-3.5 text-emerald-400" /> Exportar JSON
@@ -309,7 +311,7 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
             {/* Predictive Load Balancer Button */}
             <button
               onClick={onOpenLoadBalancer}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-cyan-950/80 text-cyan-300 border border-cyan-700 hover:bg-cyan-900 font-mono text-xs font-semibold transition cursor-pointer"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-md bg-cyan-950/80 text-cyan-300 border border-cyan-700 hover:bg-cyan-900 font-mono text-xs font-semibold transition cursor-pointer"
               title="Abrir Balanceador Predictivo de Carga (Predictive Load Balancer)"
             >
               <Scale className="w-3.5 h-3.5 text-cyan-400" /> Balanceador
@@ -318,27 +320,28 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
             {/* Disaster Recovery / SystemSnapshots Modal Button */}
             <button
               onClick={onOpenDisasterRecovery}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-rose-950/80 text-rose-300 border border-rose-700 hover:bg-rose-900 font-mono text-xs font-semibold transition cursor-pointer"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-md bg-rose-950/80 text-rose-300 border border-rose-700 hover:bg-rose-900 font-mono text-xs font-semibold transition cursor-pointer"
               title="Abrir Servicio de Instantáneas SystemSnapshots (Cron 10m) y Recuperación ante Desastres"
             >
               <ShieldAlert className="w-3.5 h-3.5 text-rose-400" /> Snapshots (10m)
             </button>
 
-            {/* Dev Onboarding & Tutorial Tour */}
+            {/* Dev Onboarding & Tutorial Tour + Video Studio */}
             <button
               onClick={onOpenTour}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-purple-950/80 text-purple-300 border border-purple-700 hover:bg-purple-900 font-mono text-xs font-semibold transition cursor-pointer"
-              title="Iniciar tutorial de onboarding para desarrolladores y guía patrón"
+              data-testid="header-onboarding-tour-btn"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-purple-950/80 text-purple-200 border border-purple-500/70 hover:bg-purple-900 font-mono text-xs font-bold transition cursor-pointer shadow-sm shadow-purple-500/20"
+              title="Iniciar tutorial de onboarding para desarrolladores y Estudio de Vídeo Explicativo (YouTube / TikTok / GitHub)"
             >
-              <GraduationCap className="w-3.5 h-3.5 text-purple-400" /> Tutorial Dev
+              <GraduationCap className="w-3.5 h-3.5 text-purple-400" /> Tutorial & Vídeo
             </button>
           </div>
         </div>
 
-        {/* Real-Time Lane Resource Consumption Progress Bars (CPU / Memory Budgets) */}
+        {/* Real-Time Lane Resource Consumption Progress Bars (CPU / Memory Budgets) — Sin recorte lateral */}
         {laneConsumption && (
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-slate-800/80 text-[11px] font-mono">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={onOpenResources}
                 className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 hover:text-cyan-200 bg-cyan-950/50 border border-cyan-800/60 px-2 py-0.5 rounded transition cursor-pointer"
@@ -349,7 +352,7 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
               </button>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 flex-1 justify-end">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 flex-1 max-w-4xl">
               {LANE_SHORT_META.map(({ lane, label, dotColor }) => {
                 const cons = laneConsumption[lane];
                 if (!cons) return null;
@@ -358,18 +361,18 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
                   <button
                     key={lane}
                     onClick={onOpenResources}
-                    className="flex items-center gap-2.5 bg-slate-900/90 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-lg px-2.5 py-1 transition cursor-pointer min-w-[230px]"
+                    className="flex items-center gap-2 bg-slate-900/90 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-lg px-2.5 py-1 transition cursor-pointer min-w-0"
                     title={`Carril ${label} — CPU: ${cons.cpuUsedUnits}/${cons.budget.cpuCapUnits} mCPU (${cons.cpuUsagePercent}%) | RAM: ${cons.memoryUsedMb}/${cons.budget.memoryCapMb} MB (${cons.memoryUsagePercent}%). Clic para ajustar presupuesto.`}
                   >
                     <div className="flex items-center gap-1.5 shrink-0">
                       <span className={`w-2 h-2 rounded-full ${dotColor}`} />
-                      <span className="font-bold text-slate-200 text-[10.5px]">{label}</span>
+                      <span className="font-bold text-slate-200 text-[10px] whitespace-nowrap">{label}</span>
                     </div>
 
-                    <div className="flex-1 flex flex-col gap-1 min-w-[110px]">
+                    <div className="flex-1 flex flex-col gap-0.5 min-w-0">
                       {/* CPU Progress Bar */}
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] text-slate-400 w-7 text-left">CPU</span>
+                        <span className="text-[8.5px] text-slate-400 w-6 text-left">CPU</span>
                         <div className="flex-1 h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
                           <div
                             className={`h-full transition-all duration-300 ${barColor}`}
@@ -377,7 +380,7 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
                           />
                         </div>
                         <span
-                          className={`text-[9.5px] font-bold w-8 text-right ${
+                          className={`text-[9px] font-bold w-7 text-right ${
                             cons.cpuUsagePercent >= 90
                               ? 'text-rose-400'
                               : cons.cpuUsagePercent >= 70
@@ -391,7 +394,7 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
 
                       {/* RAM Progress Bar */}
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] text-slate-400 w-7 text-left">RAM</span>
+                        <span className="text-[8.5px] text-slate-400 w-6 text-left">RAM</span>
                         <div className="flex-1 h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
                           <div
                             className={`h-full transition-all duration-300 ${barColor}`}
@@ -399,7 +402,7 @@ export const HeaderHUD: React.FC<HeaderHUDProps> = ({
                           />
                         </div>
                         <span
-                          className={`text-[9.5px] font-bold w-8 text-right ${
+                          className={`text-[9px] font-bold w-7 text-right ${
                             cons.memoryUsagePercent >= 90
                               ? 'text-rose-400'
                               : cons.memoryUsagePercent >= 70

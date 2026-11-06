@@ -35,7 +35,14 @@ import {
   Zap,
   TrendingUp,
   TrendingDown,
+  Boxes,
+  Layers,
+  RotateCcw,
 } from 'lucide-react';
+import {
+  calculateNode3DElevation,
+  getClusterBaseElevation,
+} from '../utils/node3dTransform';
 
 interface NodeInspectorModalProps {
   node: PipelineNode | null;
@@ -43,6 +50,14 @@ interface NodeInspectorModalProps {
   logs: ActivityLogEntry[];
   onClose: () => void;
   onInjectFault: (nodeId: string) => void;
+  activeNodeId?: string;
+  activeTaskPathNodeIds?: string[];
+  densityScore?: number;
+  isBottleneck?: boolean;
+  isEditMode3DDisabled?: boolean;
+  onToggleEditMode3D?: () => void;
+  manualZOverride?: number | null;
+  onChangeManualZOverride?: (nodeId: string, value: number | null) => void;
 }
 
 export const NodeInspectorModal: React.FC<NodeInspectorModalProps> = ({
@@ -51,6 +66,14 @@ export const NodeInspectorModal: React.FC<NodeInspectorModalProps> = ({
   logs,
   onClose,
   onInjectFault,
+  activeNodeId,
+  activeTaskPathNodeIds = [],
+  densityScore = 0,
+  isBottleneck = false,
+  isEditMode3DDisabled = false,
+  onToggleEditMode3D,
+  manualZOverride = null,
+  onChangeManualZOverride,
 }) => {
   const [liveTick, setLiveTick] = useState(0);
   const [manualSpikeBoostMs, setManualSpikeBoostMs] = useState(0);
@@ -83,6 +106,30 @@ export const NodeInspectorModal: React.FC<NodeInspectorModalProps> = ({
     (l) => l.source === node.name || l.source === node.label || l.source === node.id
   );
   const currentTask = tasks.find((t) => t.id === node.currentTaskId);
+
+  // Cálculo de la elevación Z dinámica y estado de override para el depurador lateral
+  const isNodeExecuting =
+    node.status === 'running' || (activeNodeId ? node.id === activeNodeId : false);
+  const isPathStep = activeTaskPathNodeIds.includes(node.id);
+  const pathStepIndex = activeTaskPathNodeIds.indexOf(node.id);
+  const isManualOverrideActive = manualZOverride !== null && manualZOverride !== undefined;
+
+  const elevationDebug = calculateNode3DElevation({
+    nodeId: node.id,
+    layer: node.layer,
+    isNodeExecuting,
+    isPathStep,
+    isInspected: true,
+    isHovered: false,
+    isBottleneck,
+    heatScore: densityScore,
+    totalExecutions: (node.metrics?.successCount || 0) + (node.metrics?.errorCount || 0),
+    mode: 'activity',
+    depthScale: 1.0,
+    activeTaskPathNodeIds,
+    manualZOverride,
+    isEditMode3DDisabled,
+  });
 
   // Parámetros del medidor circular SVG para el Confidence Score
   const gaugeRadius = 32;
@@ -136,7 +183,7 @@ export const NodeInspectorModal: React.FC<NodeInspectorModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="relative w-full max-w-5xl bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Encabezado */}
         <div
           className="p-4 border-b border-slate-800 flex items-center justify-between"
@@ -186,9 +233,11 @@ export const NodeInspectorModal: React.FC<NodeInspectorModalProps> = ({
           </div>
         </div>
 
-        {/* Cuerpo con Scroll */}
-        <div className="p-5 overflow-y-auto space-y-5 text-xs font-mono">
-          {/* WIDGET 1: NODE AUTONOMY INDEX (ÍNDICE DE AUTONOMÍA DEL NODO) */}
+        {/* Contenedor Principal Dividido: Telemetría (Izquierda) + Barra Lateral de Depuración 3D Z (Derecha) */}
+        <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
+          {/* Cuerpo con Scroll */}
+          <div className="flex-1 p-5 overflow-y-auto space-y-5 text-xs font-mono">
+            {/* WIDGET 1: NODE AUTONOMY INDEX (ÍNDICE DE AUTONOMÍA DEL NODO) */}
           <div
             data-testid="node-autonomy-widget"
             className="p-4 rounded-xl bg-slate-950/90 border border-slate-800 shadow-inner space-y-3.5"
@@ -681,6 +730,278 @@ export const NodeInspectorModal: React.FC<NodeInspectorModalProps> = ({
               )}
             </div>
           </div>
+          </div>
+
+          {/* BARRA LATERAL DE DEPURACIÓN DEL EJE Z & CONTROL MANUAL DE PROFUNDIDAD */}
+          <aside
+            data-testid="z-depth-debugger-sidebar"
+            className="w-full lg:w-80 shrink-0 border-t lg:border-t-0 lg:border-l border-slate-800 bg-slate-950/95 p-4 overflow-y-auto space-y-4 text-xs font-mono"
+          >
+            {/* Cabecera del Depurador 3D */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Boxes className="w-4 h-4 text-cyan-400" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-200">
+                  Depurador 3D • Eje Z
+                </span>
+              </div>
+              <span
+                className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase border ${
+                  isEditMode3DDisabled
+                    ? 'bg-amber-950/80 border-amber-500/60 text-amber-300'
+                    : isManualOverrideActive
+                    ? 'bg-emerald-950/80 border-emerald-500/60 text-emerald-300'
+                    : 'bg-cyan-950/80 border-cyan-500/60 text-cyan-300'
+                }`}
+              >
+                {isEditMode3DDisabled
+                  ? 'EDICIÓN 2D'
+                  : isManualOverrideActive
+                  ? 'MANUAL Z'
+                  : 'AUTO Z'}
+              </span>
+            </div>
+
+            {/* Previsualización Visual Interactiva del Plano Z */}
+            <div className="p-3 rounded-xl bg-[#060a14] border border-slate-800/90 space-y-3">
+              <div className="flex items-center justify-between text-[10px] text-slate-400">
+                <span>Previsualización de Cota Z</span>
+                <span className="text-cyan-300 font-bold">
+                  scale({elevationDebug.scaleBonus.toFixed(3)})
+                </span>
+              </div>
+
+              {/* Cámara de Previsualización 3D */}
+              <div
+                className="relative h-28 rounded-lg bg-slate-950 border border-slate-800/80 overflow-hidden flex items-center justify-center"
+                style={{
+                  perspective: '500px',
+                  backgroundImage:
+                    'linear-gradient(rgba(56, 189, 248, 0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(56, 189, 248, 0.06) 1px, transparent 1px)',
+                  backgroundSize: '16px 16px',
+                }}
+              >
+                {/* Plano Base 2D (0px) */}
+                <div className="absolute bottom-3 left-6 right-6 h-5 rounded border border-dashed border-slate-700/80 bg-slate-900/40 flex items-center justify-between px-2 text-[8.5px] text-slate-500">
+                  <span>Plano 2D Base</span>
+                  <span>Z = 0px</span>
+                </div>
+
+                {/* Sombra Proyectada */}
+                {elevationDebug.zElevation > 0 && (
+                  <div
+                    className="absolute bottom-4 w-28 h-5 rounded-full transition-all duration-300"
+                    style={{
+                      backgroundColor: elevationDebug.groundShadow.color,
+                      filter: `blur(${Math.min(12, Math.max(3, elevationDebug.zElevation * 0.1))}px)`,
+                      opacity: elevationDebug.groundShadow.opacity,
+                    }}
+                  />
+                )}
+
+                {/* Pilar de Elevación */}
+                {elevationDebug.zElevation > 0 && (
+                  <div
+                    className="absolute bottom-5 w-0.5 transition-all duration-300"
+                    style={{
+                      height: `${Math.min(54, Math.round(elevationDebug.zElevation * 0.42))}px`,
+                      background: isManualOverrideActive
+                        ? 'linear-gradient(to top, rgba(16,185,129,0.2), rgba(16,185,129,0.95))'
+                        : 'linear-gradient(to top, rgba(56,189,248,0.2), rgba(56,189,248,0.95))',
+                    }}
+                  />
+                )}
+
+                {/* Nodo en Miniatura Elevado */}
+                <div
+                  className={`relative px-3 py-1.5 rounded-lg border-2 text-[10px] font-bold transition-all duration-300 flex items-center gap-1.5 shadow-lg ${
+                    isManualOverrideActive
+                      ? 'bg-emerald-950/90 border-emerald-400 text-emerald-200'
+                      : elevationDebug.zElevation > 0
+                      ? 'bg-cyan-950/90 border-cyan-400 text-cyan-200'
+                      : 'bg-slate-900 border-slate-700 text-slate-400'
+                  }`}
+                  style={{
+                    transform: `translateY(-${Math.min(
+                      48,
+                      Math.round(elevationDebug.zElevation * 0.38)
+                    )}px) scale(${elevationDebug.scaleBonus})`,
+                  }}
+                >
+                  <span>{node.label}</span>
+                  <span className="px-1.5 py-0.2 rounded bg-slate-950/90 text-[8.5px]">
+                    +{elevationDebug.zElevation}px
+                  </span>
+                </div>
+              </div>
+
+              {/* Tarjetas de Comparación: Z Calculado Dinámicamente vs Z Efectivo */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800">
+                  <span className="text-[9px] text-slate-400 block">Z Calculado (Auto)</span>
+                  <span
+                    data-testid="z-debug-auto-value"
+                    className="text-sm font-extrabold text-cyan-300"
+                  >
+                    {elevationDebug.autoCalculatedZ}px
+                  </span>
+                </div>
+                <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800">
+                  <span className="text-[9px] text-slate-400 block">translateZ Activo</span>
+                  <span
+                    data-testid="z-debug-effective-value"
+                    className={`text-sm font-extrabold ${
+                      isEditMode3DDisabled
+                        ? 'text-amber-300'
+                        : isManualOverrideActive
+                        ? 'text-emerald-300'
+                        : 'text-sky-300'
+                    }`}
+                  >
+                    {elevationDebug.zElevation}px
+                  </span>
+                </div>
+              </div>
+
+              {/* Desglose de Factores de Cálculo Dinámico */}
+              <div className="space-y-1 pt-1 border-t border-slate-800/80 text-[10px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">En Ruta Activa:</span>
+                  <span className={isPathStep ? 'text-cyan-300 font-bold' : 'text-slate-500'}>
+                    {isPathStep ? `SÍ (Paso ${pathStepIndex + 1} → 100px)` : 'No (0px)'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Estado Ejecución:</span>
+                  <span className={isNodeExecuting ? 'text-sky-300 font-bold' : 'text-slate-400'}>
+                    {isNodeExecuting ? 'EJECUTANDO (100px)' : node.status.toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Cota Base Clúster C{node.layer}:</span>
+                  <span className="text-slate-300 font-bold">
+                    {getClusterBaseElevation(node.layer)}px
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* CONTROL 1: TOGGLE PARA DESACTIVAR TEMPORALMENTE 3D EN MODO EDICIÓN DE GRAFOS */}
+            <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-[10.5px] font-bold text-slate-200 block">
+                    Modo Edición de Grafos (2D)
+                  </span>
+                  <span className="text-[9.5px] text-slate-400 font-sans">
+                    Desactiva temporalmente el relieve 3D (Z=0px)
+                  </span>
+                </div>
+                <button
+                  data-testid="toggle-edit-mode-3d-disable"
+                  onClick={() => onToggleEditMode3D && onToggleEditMode3D()}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border transition cursor-pointer shrink-0 ${
+                    isEditMode3DDisabled
+                      ? 'bg-amber-500/25 border-amber-400 text-amber-200 shadow-sm shadow-amber-500/20'
+                      : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {isEditMode3DDisabled ? '3D PAUSADO' : '3D ACTIVO'}
+                </button>
+              </div>
+            </div>
+
+            {/* CONTROL 2: OVERRIDE MANUAL DE PROFUNDIDAD translateZ PARA EL NODO SELECCIONADO */}
+            <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-[10.5px] font-bold text-slate-200 block">
+                    Override Manual translateZ
+                  </span>
+                  <span className="text-[9.5px] text-slate-400 font-sans">
+                    Ajusta manualmente la profundidad Z de este nodo
+                  </span>
+                </div>
+                <button
+                  data-testid="toggle-manual-z-override"
+                  onClick={() => {
+                    if (!onChangeManualZOverride) return;
+                    if (isManualOverrideActive) {
+                      onChangeManualZOverride(node.id, null);
+                    } else {
+                      onChangeManualZOverride(
+                        node.id,
+                        elevationDebug.autoCalculatedZ > 0 ? elevationDebug.autoCalculatedZ : 100
+                      );
+                    }
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase border transition cursor-pointer shrink-0 ${
+                    isManualOverrideActive
+                      ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200 shadow-sm shadow-emerald-500/20'
+                      : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {isManualOverrideActive ? 'OVERRIDE: ON' : 'OVERRIDE: OFF'}
+                </button>
+              </div>
+
+              {/* Control Deslizante (Slider) y Presets Rápidos de translateZ */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="text-slate-400">Profundidad Manual:</span>
+                  <span className="font-bold text-emerald-300">
+                    {isManualOverrideActive ? `${manualZOverride}px` : `${elevationDebug.autoCalculatedZ}px (Auto)`}
+                  </span>
+                </div>
+
+                <input
+                  data-testid="manual-z-slider"
+                  type="range"
+                  min={0}
+                  max={160}
+                  step={5}
+                  value={isManualOverrideActive ? manualZOverride : elevationDebug.autoCalculatedZ}
+                  onChange={(e) => {
+                    const nextVal = Number(e.target.value);
+                    if (onChangeManualZOverride) {
+                      onChangeManualZOverride(node.id, nextVal);
+                    }
+                  }}
+                  className="w-full accent-emerald-400 cursor-pointer h-1.5 bg-slate-950 rounded-lg"
+                />
+
+                <div className="grid grid-cols-4 gap-1.5 pt-1">
+                  {[0, 50, 100, 140].map((presetZ) => (
+                    <button
+                      key={presetZ}
+                      data-testid={`manual-z-preset-${presetZ}`}
+                      onClick={() =>
+                        onChangeManualZOverride && onChangeManualZOverride(node.id, presetZ)
+                      }
+                      className={`py-1 rounded text-[9.5px] font-bold border transition cursor-pointer ${
+                        isManualOverrideActive && manualZOverride === presetZ
+                          ? 'bg-emerald-950 border-emerald-400 text-emerald-200'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                      }`}
+                    >
+                      {presetZ}px
+                    </button>
+                  ))}
+                </div>
+
+                {isManualOverrideActive && (
+                  <button
+                    data-testid="reset-manual-z-btn"
+                    onClick={() => onChangeManualZOverride && onChangeManualZOverride(node.id, null)}
+                    className="w-full mt-1 py-1.5 px-2 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center gap-1.5 text-[10px] transition cursor-pointer"
+                  >
+                    <RotateCcw className="w-3 h-3 text-cyan-400" />
+                    <span>Restaurar Cálculo Automático ({elevationDebug.autoCalculatedZ}px)</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </aside>
         </div>
 
         {/* Footer con Acciones de Diagnóstico */}

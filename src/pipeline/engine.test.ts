@@ -690,3 +690,142 @@ test('calculateNodePerformanceSummary computes 24-hour hourly trend points with 
   assert.ok(firstPoint.successRate >= 0 && firstPoint.successRate <= 100);
   assert.ok(firstPoint.avgLatencyMs > 0);
 });
+
+// ==========================================
+// TEST 3D TRANSFORMATION LAYER & ELEVATION MATRIX
+// ==========================================
+import {
+  calculateNode3DElevation,
+  getClusterBaseElevation,
+  calculateActivityIntensity,
+  calculatePathStepElevation,
+} from '../utils/node3dTransform';
+
+test('3D Transformation Layer applies varying CSS translateZ based on activity intensity, path (0px to 100px), cluster level, and manual overrides', () => {
+  const activePath = ['carril_urgencia', 'produccion'];
+
+  // 1. Verificación en modo 'activity': nodo en ruta/activo (100px) vs nodo inactivo (0px)
+  const activeResult = calculateNode3DElevation({
+    nodeId: 'carril_urgencia',
+    layer: 'layer4',
+    isNodeExecuting: true,
+    isPathStep: true,
+    isInspected: false,
+    isHovered: false,
+    isBottleneck: false,
+    mode: 'activity',
+    activeTaskPathNodeIds: activePath,
+  });
+
+  const idleResult = calculateNode3DElevation({
+    nodeId: 'filtro',
+    layer: 'layer3',
+    isNodeExecuting: false,
+    isPathStep: false,
+    isInspected: false,
+    isHovered: false,
+    isBottleneck: false,
+    heatScore: 0,
+    totalExecutions: 0,
+    mode: 'activity',
+    activeTaskPathNodeIds: activePath,
+  });
+
+  assert.equal(activeResult.zElevation, 100);
+  assert.equal(activeResult.autoCalculatedZ, 100);
+  assert.ok(activeResult.scaleBonus > 1);
+  assert.ok(activeResult.groundShadow.blur > 30);
+  assert.ok(activeResult.badgeLabel.includes('Z+100px'));
+  assert.equal(idleResult.zElevation, 0);
+  assert.equal(idleResult.scaleBonus, 1);
+
+  // 2. Verificación de profundidades crecientes en ruta (0px -> 50px -> 75px -> 100px)
+  const threeStepPath = ['entradas', 'analyze', 'produccion'];
+  assert.equal(
+    calculatePathStepElevation({
+      nodeId: 'entradas',
+      activeTaskPathNodeIds: threeStepPath,
+      isNodeExecuting: false,
+    }),
+    50
+  );
+  assert.equal(
+    calculatePathStepElevation({
+      nodeId: 'analyze',
+      activeTaskPathNodeIds: threeStepPath,
+      isNodeExecuting: false,
+    }),
+    75
+  );
+  assert.equal(
+    calculatePathStepElevation({
+      nodeId: 'produccion',
+      activeTaskPathNodeIds: threeStepPath,
+      isNodeExecuting: false,
+    }),
+    100
+  );
+
+  // 3. Verificación de Override Manual de translateZ desde NodeInspectorModal
+  const overriddenResult = calculateNode3DElevation({
+    nodeId: 'filtro',
+    layer: 'layer3',
+    isNodeExecuting: false,
+    isPathStep: false,
+    isInspected: true,
+    isHovered: false,
+    isBottleneck: false,
+    mode: 'activity',
+    activeTaskPathNodeIds: activePath,
+    manualZOverride: 140,
+  });
+  assert.equal(overriddenResult.isManualOverride, true);
+  assert.equal(overriddenResult.zElevation, 140);
+  assert.equal(overriddenResult.autoCalculatedZ, 65);
+  assert.ok(overriddenResult.badgeLabel.includes('Z+140px MANUAL'));
+
+  // 4. Verificación del Toggle de Modo Edición de Grafos (isEditMode3DDisabled)
+  const editModeResult = calculateNode3DElevation({
+    nodeId: 'carril_urgencia',
+    layer: 'layer4',
+    isNodeExecuting: true,
+    isPathStep: true,
+    isInspected: true,
+    isHovered: false,
+    isBottleneck: false,
+    mode: 'activity',
+    activeTaskPathNodeIds: activePath,
+    isEditMode3DDisabled: true,
+  });
+  assert.equal(editModeResult.zElevation, 0);
+  assert.equal(editModeResult.autoCalculatedZ, 100);
+
+  // 5. Verificación en modo 'cluster': capas C1 a C5 tienen cotas Z crecientes
+  const c1Elevation = getClusterBaseElevation('layer1');
+  const c3Elevation = getClusterBaseElevation('layer3');
+  const c5Elevation = getClusterBaseElevation('layer5');
+  assert.ok(c1Elevation < c3Elevation);
+  assert.ok(c3Elevation < c5Elevation);
+
+  const clusterResultC5 = calculateNode3DElevation({
+    nodeId: 'produccion',
+    layer: 'layer5',
+    isNodeExecuting: false,
+    isPathStep: false,
+    isInspected: false,
+    isHovered: false,
+    isBottleneck: false,
+    mode: 'cluster',
+  });
+  assert.equal(clusterResultC5.zElevation, 65);
+  assert.ok(clusterResultC5.badgeLabel.includes('CLÚSTER C5'));
+
+  // 6. Intensidad de actividad calculada correctamente
+  const intensityExecuting = calculateActivityIntensity({
+    isNodeExecuting: true,
+    isPathStep: false,
+    isBottleneck: false,
+  });
+  assert.equal(intensityExecuting, 100);
+});
+
