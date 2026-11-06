@@ -1,6 +1,5 @@
 /**
- * AgentOS - Modal de Onboarding y Tour Interactivo para Desarrolladores
- * Incluye la guía paso a paso y el patrón reutilizable para redactar futuros tutoriales.
+ * AgentOS - Modal de Onboarding, Estudio de Vídeo Explicativo (YouTube / TikTok / GitHub) y Tour Interactivo
  */
 
 import React, { useState } from 'react';
@@ -13,27 +12,29 @@ import {
   ExternalLink,
   Code2,
   BookOpen,
-  Sparkles,
-  ArrowRight,
   Check,
   Copy,
+  Film,
 } from 'lucide-react';
 import { ActiveTab } from './LayerFilterBar';
 import { DEV_ONBOARDING_STEPS, TUTORIAL_PATTERN_GUIDE } from '../tutorial/onboardingData';
+import { OnboardingExplainerVideoStudio } from './OnboardingExplainerVideoStudio';
 
 interface DevOnboardingModalProps {
   isOpen: boolean;
   onClose: () => void;
   onNavigateTab: (tab: ActiveTab) => void;
+  initialMode?: 'tour' | 'video' | 'pattern';
 }
 
 export const DevOnboardingModal: React.FC<DevOnboardingModalProps> = ({
   isOpen,
   onClose,
   onNavigateTab,
+  initialMode = 'video',
 }) => {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [activeTabMode, setActiveTabMode] = useState<'tour' | 'pattern'>('tour');
+  const [activeTabMode, setActiveTabMode] = useState<'tour' | 'video' | 'pattern'>(initialMode);
   const [copiedCode, setCopiedCode] = useState(false);
 
   if (!isOpen) return null;
@@ -71,10 +72,10 @@ export const DevOnboardingModal: React.FC<DevOnboardingModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
-      <div className="relative w-full max-w-3xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        {/* 1. Header con Selector de Modo Tour vs Patrón */}
-        <div className="p-5 border-b border-slate-800 bg-slate-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-150">
+      <div className="relative w-full max-w-5xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+        {/* 1. Header con Selector de Modo: Vídeo Explicativo vs Tour vs Patrón */}
+        <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400">
               <GraduationCap className="w-5 h-5" />
@@ -82,57 +83,75 @@ export const DevOnboardingModal: React.FC<DevOnboardingModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-bold font-mono text-white">
-                  {activeTabMode === 'tour'
+                  {activeTabMode === 'video'
+                    ? 'Estudio de Vídeo Explicativo (YouTube · TikTok · GitHub)'
+                    : activeTabMode === 'tour'
                     ? 'Tutorial de Onboarding para Desarrolladores'
                     : 'Patrón para Crear Futuros Tutoriales'}
                 </h3>
                 <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono border border-purple-500/30">
-                  DEV STANDARD
+                  DEV ONBOARDING
                 </span>
               </div>
               <p className="text-xs text-slate-400 font-sans">
-                {activeTabMode === 'tour'
-                  ? 'Guía interactiva paso a paso para familiarizarse con el sistema operativo de agentes'
-                  : 'Documentación del esquema modular para extender la base de conocimiento del equipo'}
+                {activeTabMode === 'video'
+                  ? 'Reproduce y descarga en .webm real el vídeo explicativo en 16:9 (YouTube/GitHub) o 9:16 (TikTok)'
+                  : activeTabMode === 'tour'
+                  ? 'Guía interactiva paso a paso por el grafo y el backend Git real de 11 puntos'
+                  : 'Documentación del esquema modular para extender la base de conocimiento'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center p-1 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono">
               <button
+                data-testid="onboarding-tab-video"
+                onClick={() => setActiveTabMode('video')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded transition cursor-pointer ${
+                  activeTabMode === 'video'
+                    ? 'bg-cyan-600 text-slate-950 font-bold'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Film className="w-3.5 h-3.5" />
+                <span>Vídeo Explicativo (YT / TikTok / GitHub)</span>
+              </button>
+              <button
+                data-testid="onboarding-tab-tour"
                 onClick={() => setActiveTabMode('tour')}
-                className={`px-3 py-1 rounded transition ${
+                className={`px-3 py-1 rounded transition cursor-pointer ${
                   activeTabMode === 'tour'
                     ? 'bg-purple-600 text-white font-bold'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Tour Interactivo
+                Tour Paso a Paso
               </button>
               <button
+                data-testid="onboarding-tab-pattern"
                 onClick={() => setActiveTabMode('pattern')}
-                className={`flex items-center gap-1 px-3 py-1 rounded transition ${
+                className={`flex items-center gap-1 px-3 py-1 rounded transition cursor-pointer ${
                   activeTabMode === 'pattern'
                     ? 'bg-purple-600 text-white font-bold'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
                 <Code2 className="w-3 h-3" />
-                Guía Patrón
+                <span>Guía Patrón</span>
               </button>
             </div>
 
             <button
               onClick={onClose}
-              className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition"
+              className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer"
             >
               ✕
             </button>
           </div>
         </div>
 
-        {/* 2. Barra de Progreso */}
+        {/* 2. Barra de Progreso (Solo en modo Tour) */}
         {activeTabMode === 'tour' && (
           <div className="w-full bg-slate-950 px-5 pt-3 pb-2 border-b border-slate-800/80">
             <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 mb-1.5">
@@ -152,29 +171,28 @@ export const DevOnboardingModal: React.FC<DevOnboardingModalProps> = ({
         )}
 
         {/* 3. Contenido Principal */}
-        <div className="p-6 overflow-y-auto flex-1 space-y-5">
-          {activeTabMode === 'tour' ? (
+        <div className="p-5 overflow-y-auto flex-1 space-y-5">
+          {activeTabMode === 'video' ? (
+            <OnboardingExplainerVideoStudio />
+          ) : activeTabMode === 'tour' ? (
             <div className="space-y-4">
-              {/* Badge & Título */}
               <div className="flex items-center justify-between">
                 <span className="text-[10px] uppercase tracking-wider font-mono px-2.5 py-1 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-bold">
                   {currentStep.badge}
                 </span>
                 <button
                   onClick={() => onNavigateTab(currentStep.targetTab)}
-                  className="flex items-center gap-1.5 text-xs font-mono text-cyan-400 hover:text-cyan-300 hover:underline"
+                  className="flex items-center gap-1.5 text-xs font-mono text-cyan-400 hover:text-cyan-300 hover:underline cursor-pointer"
                 >
                   <span>Ir a la pestaña [{currentStep.targetTab}]</span>
                   <ExternalLink className="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              {/* Descripción */}
               <p className="text-sm text-slate-200 font-sans leading-relaxed">
                 {currentStep.description}
               </p>
 
-              {/* Conceptos Clave */}
               <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
                 <span className="text-xs font-bold font-mono text-slate-300 block">
                   Conceptos Clave de Arquitectura:
@@ -192,7 +210,6 @@ export const DevOnboardingModal: React.FC<DevOnboardingModalProps> = ({
                 </ul>
               </div>
 
-              {/* Tip para Desarrolladores Senior */}
               <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5 text-xs text-amber-200">
                 <Lightbulb className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                 <div>
@@ -204,7 +221,6 @@ export const DevOnboardingModal: React.FC<DevOnboardingModalProps> = ({
               </div>
             </div>
           ) : (
-            /* Modo Patrón para Desarrolladores */
             <div className="space-y-4">
               <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
                 <h4 className="text-sm font-bold font-mono text-white flex items-center gap-2">
@@ -228,13 +244,12 @@ export const DevOnboardingModal: React.FC<DevOnboardingModalProps> = ({
                 </div>
               </div>
 
-              {/* Bloque de Código de Ejemplo */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs font-mono text-slate-400">
                   <span>Plantilla TypeScript (TutorialStep Schema):</span>
                   <button
                     onClick={handleCopyPatternCode}
-                    className="flex items-center gap-1 text-cyan-400 hover:text-cyan-300 text-[11px]"
+                    className="flex items-center gap-1 text-cyan-400 hover:text-cyan-300 text-[11px] cursor-pointer"
                   >
                     {copiedCode ? (
                       <>
@@ -257,7 +272,7 @@ export const DevOnboardingModal: React.FC<DevOnboardingModalProps> = ({
           )}
         </div>
 
-        {/* 4. Footer con Navegación del Tour */}
+        {/* 4. Footer */}
         <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between">
           {activeTabMode === 'tour' ? (
             <>
@@ -267,19 +282,18 @@ export const DevOnboardingModal: React.FC<DevOnboardingModalProps> = ({
                 className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-mono transition ${
                   currentStepIndex === 0
                     ? 'text-slate-600 cursor-not-allowed'
-                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                    : 'text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer'
                 }`}
               >
                 <ChevronLeft className="w-4 h-4" /> Anterior
               </button>
 
-              {/* Indicadores de Pasos (1 a 8) */}
               <div className="hidden sm:flex items-center gap-1.5">
                 {DEV_ONBOARDING_STEPS.map((step, idx) => (
                   <button
                     key={step.id}
                     onClick={() => handleJumpToStep(idx)}
-                    className={`w-6 h-6 rounded-md text-[10px] font-mono font-bold transition flex items-center justify-center ${
+                    className={`w-6 h-6 rounded-md text-[10px] font-mono font-bold transition flex items-center justify-center cursor-pointer ${
                       idx === currentStepIndex
                         ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
                         : idx < currentStepIndex
@@ -306,12 +320,18 @@ export const DevOnboardingModal: React.FC<DevOnboardingModalProps> = ({
               </button>
             </>
           ) : (
-            <div className="flex items-center justify-end w-full">
+            <div className="flex items-center justify-between w-full">
               <button
                 onClick={() => setActiveTabMode('tour')}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-mono text-xs font-bold transition"
+                className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono text-xs transition cursor-pointer"
               >
-                Volver al Tour Interactivo
+                Ver Tour Paso a Paso
+              </button>
+              <button
+                onClick={onClose}
+                className="px-4 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-mono text-xs font-bold transition cursor-pointer"
+              >
+                Cerrar Estudio
               </button>
             </div>
           )}

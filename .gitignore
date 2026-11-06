@@ -7,3 +7,6 @@ coverage/
 .env*
 !.env.example
 .playwright-cli/
+.factory-git-workspace/
+.factory-remote-bare.git/
+tmp/

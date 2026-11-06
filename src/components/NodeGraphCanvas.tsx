@@ -137,7 +137,7 @@ const SpringAnimatedNodeCard: React.FC<SpringAnimatedNodeCardProps> = ({
         transition:
           'box-shadow 0.35s ease, border-color 0.2s ease, opacity 0.3s ease, filter 0.3s ease',
       }}
-      className={`absolute rounded-xl border-2 backdrop-blur-md cursor-pointer flex flex-col justify-between p-2 ${glowClass}`}
+      className={`absolute rounded-xl border-2 crisp-vector-node cursor-pointer flex flex-col justify-between p-2 ${glowClass}`}
     >
       {children}
     </motion.div>
@@ -152,9 +152,9 @@ interface NodeGraphCanvasProps {
   diagramMode: DiagramMode;
   onSelectNode: (node: PipelineNode) => void;
   zoomLevel: number;
-  panOffset: { x: number; y: number };
-  onPanChange: (pan: { x: number; y: number }) => void;
-  onZoomChange: (zoom: number) => void;
+  panOffset?: { x: number; y: number };
+  onPanChange?: (pan: { x: number; y: number }) => void;
+  onZoomChange?: (zoom: number) => void;
   heatmapEnabled?: boolean;
   onToggleHeatmap?: () => void;
   densityMap?: Record<string, NodeDensityMetrics>;
@@ -173,7 +173,7 @@ export const NodeGraphCanvas: React.FC<NodeGraphCanvasProps> = ({
   diagramMode,
   onSelectNode,
   zoomLevel,
-  panOffset,
+  panOffset = { x: 15, y: 15 },
   onPanChange,
   onZoomChange,
   heatmapEnabled = false,
@@ -207,10 +207,12 @@ export const NodeGraphCanvas: React.FC<NodeGraphCanvasProps> = ({
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging) return;
-    onPanChange({
-      x: e.clientX - dragStart.x,
-      y: e.clientY - dragStart.y,
-    });
+    if (onPanChange) {
+      onPanChange({
+        x: e.clientX - dragStart.x,
+        y: e.clientY - dragStart.y,
+      });
+    }
   };
 
   const handleMouseUp = () => {
@@ -220,8 +222,10 @@ export const NodeGraphCanvas: React.FC<NodeGraphCanvasProps> = ({
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-    const newZoom = Math.min(Math.max(zoomLevel * zoomFactor, 0.45), 2.0);
-    onZoomChange(newZoom);
+    const newZoom = Math.min(Math.max(zoomLevel * zoomFactor, 0.45), 4.0);
+    if (onZoomChange) {
+      onZoomChange(newZoom);
+    }
   };
 
   // Helper de icono según categoría de la leyenda

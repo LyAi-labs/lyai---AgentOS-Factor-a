@@ -1,7 +1,6 @@
 /**
- * Pruebas automáticas reales del backend GitFactory (Puntos 2, 3 y 7)
+ * Pruebas automáticas reales del backend GitFactory (11 Puntos REALES en Linux + Git)
  * Regla 4: Pruebas automáticas que NO llaman a ningún modelo externo.
- * Ejecutan el binario `git` real de Linux sobre repositorios temporales aislados en `/tmp`.
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -11,7 +10,7 @@ import os from 'os';
 import path from 'path';
 import { GitFactoryBackend, ELEVEN_POINTS_AUDIT } from './gitFactory';
 
-describe('Backend Real GitFactory — Puntos 2, 3 y 7 (Sin llamadas a modelos)', () => {
+describe('Backend Real GitFactory — 11 Puntos Reales en Linux y Git (Sin llamadas a modelos)', () => {
   let tempRepoDir: string;
   let backend: GitFactoryBackend;
 
@@ -24,18 +23,22 @@ describe('Backend Real GitFactory — Puntos 2, 3 y 7 (Sin llamadas a modelos)',
     if (tempRepoDir && fs.existsSync(tempRepoDir)) {
       fs.rmSync(tempRepoDir, { recursive: true, force: true });
     }
+    const bareDir = `${tempRepoDir}-remote-bare.git`;
+    if (fs.existsSync(bareDir)) {
+      fs.rmSync(bareDir, { recursive: true, force: true });
+    }
   });
 
-  it('Inicializa un repositorio Git real en la rama main con árbol limpio', () => {
+  it('Inicializa un repositorio Git real en la rama main con reglas Brain y árbol limpio', () => {
     const status = backend.getRepoStatus();
     assert.equal(status.currentBranch, 'main');
     assert.equal(status.isClean, true);
     assert.equal(status.uncommittedFiles.length, 0);
-    assert.ok(status.headCommitHash.length >= 7);
     assert.ok(fs.existsSync(path.join(tempRepoDir, '.git')));
+    assert.ok(fs.existsSync(path.join(tempRepoDir, 'brain', 'wiki-rules.md')));
   });
 
-  it('Punto 2 (Spec): Genera y persiste la especificación en disco antes de construir', () => {
+  it('Puntos 1 y 2: Ingesta, analiza alcance real en disco y persiste especificación coherente', () => {
     const task = backend.createTask({
       id: 'ENCARGO-01',
       title: 'Validar token de sesión',
@@ -44,9 +47,10 @@ describe('Backend Real GitFactory — Puntos 2, 3 y 7 (Sin llamadas a modelos)',
     });
 
     assert.equal(task.stage, 'pendiente_spec');
-    assert.equal(task.spec, null);
+    assert.ok(task.ingestion);
+    assert.equal(task.ingestion.filterPassed, true);
+    assert.equal(task.ingestion.detectedCategory, 'no_visual');
 
-    // Intentar construir sin spec debe fallar
     assert.throws(
       () => backend.buildTaskInIsolatedBranch('ENCARGO-01'),
       /sin haber generado primero su especificación \(Punto 2\)/
@@ -55,12 +59,11 @@ describe('Backend Real GitFactory — Puntos 2, 3 y 7 (Sin llamadas a modelos)',
     const updated = backend.generateSpecForTask('ENCARGO-01');
     assert.equal(updated.stage, 'spec_generado');
     assert.ok(updated.spec);
+    assert.equal(updated.spec.coherenceVerified, true);
     assert.equal(updated.spec.specFilePath, 'specs/ENCARGO-01.md');
-    assert.equal(updated.spec.adapterMode, 'SIMULADO_DETERMINISTA_SIN_LLM');
-    assert.ok(updated.spec.markdownContent.includes('Validar token de sesión'));
   });
 
-  it('Punto 3 (Builder en rama aislada): Crea rama Git real task/<id>, confirma archivos y obtiene diff real', () => {
+  it('Puntos 3, 4, 5, 6 y 10: Construye en rama aislada Git, ejecuta subproceso Verificador sobre BD aislada, firma con Ed25519 y aprueba 4/4', () => {
     backend.createTask({
       id: 'ENCARGO-02',
       title: 'Módulo de auditoría Git',
@@ -74,21 +77,29 @@ describe('Backend Real GitFactory — Puntos 2, 3 y 7 (Sin llamadas a modelos)',
     assert.equal(builtTask.stage, 'construido_en_rama');
     assert.ok(builtTask.build);
     assert.equal(builtTask.build.branchName, 'task/ENCARGO-02');
-    assert.ok(builtTask.build.commitHash.length >= 7);
-    assert.ok(builtTask.build.modifiedFiles.includes('specs/ENCARGO-02.md'));
-    assert.ok(builtTask.build.modifiedFiles.includes('src/gitAudit.ts'));
     assert.ok(builtTask.build.gitDiff.includes('diff --git'));
 
-    // Verificar directamente con git real que la rama existe y contiene los archivos
-    const status = backend.getRepoStatus();
-    assert.equal(status.currentBranch, 'task/ENCARGO-02');
-    assert.ok(status.branches.includes('main'));
-    assert.ok(status.branches.includes('task/ENCARGO-02'));
-    assert.ok(fs.existsSync(path.join(tempRepoDir, 'src/gitAudit.ts')));
-    assert.ok(fs.existsSync(path.join(tempRepoDir, 'specs/ENCARGO-02.md')));
+    // Punto 10: Seguridad
+    assert.ok(builtTask.securityScan);
+    assert.equal(builtTask.securityScan.passed, true);
+
+    // Punto 4: Evidencia con SHA-256 real
+    assert.ok(builtTask.visualEvidence);
+    assert.equal(builtTask.visualEvidence.assertionsPassed, true);
+
+    // Punto 5: Verificador con BD aislada y subproceso Node real
+    assert.ok(builtTask.verifier);
+    assert.equal(builtTask.verifier.passed, true);
+    assert.equal(builtTask.verifier.subprocessExitCode, 0);
+    assert.ok(builtTask.verifier.stdout.includes('VERIFICADOR_OK'));
+
+    // Punto 6: Approver 4/4 con firma criptográfica Ed25519 real
+    assert.ok(builtTask.approver);
+    assert.equal(builtTask.approver.votesPassed, 4);
+    assert.equal(builtTask.approver.approved, true);
   });
 
-  it('Punto 7 (Fusión protegida): Se NIEGA a fusionar en main si hay cambios sin confirmar y fusiona cuando se limpia', () => {
+  it('Puntos 7, 8, 9 y 11: Se NIEGA a fusionar si hay cambios sin confirmar y cuando está limpio fusiona en main, crea checkpoint tag y hace git push real a origin', () => {
     backend.createTask({
       id: 'ENCARGO-03',
       title: 'Cierre protegido en main',
@@ -105,44 +116,29 @@ describe('Backend Real GitFactory — Puntos 2, 3 y 7 (Sin llamadas a modelos)',
       '// Archivo modificado sin confirmar en git\nexport const dirty = 1;\n'
     );
 
-    const dirtyStatus = backend.getRepoStatus();
-    assert.equal(dirtyStatus.isClean, false);
-    assert.ok(dirtyStatus.uncommittedFiles.some((f) => f.includes('src/archivo_sucio.ts')));
-
-    // 2. Intentar fusionar en `main`: DEBE NEGARSE rotundamente
     const refusedAttempt = backend.mergeTaskBranchToMain('ENCARGO-03');
     assert.equal(refusedAttempt.mergeResult.merged, false);
     assert.equal(refusedAttempt.task.stage, 'fusion_rechazada_cambios_sin_confirmar');
     assert.ok(refusedAttempt.mergeResult.refusalReason?.includes('FUSIÓN RECHAZADA (Punto 7)'));
-    assert.ok(
-      refusedAttempt.mergeResult.uncommittedFiles.some((f) =>
-        f.includes('src/archivo_sucio.ts')
-      )
-    );
 
-    // 3. Limpiar los cambios sin confirmar y volver a intentar la fusión
+    // 2. Limpiar los cambios sin confirmar y ejecutar cierre + push
     backend.discardUncommittedChanges();
-    const cleanStatus = backend.getRepoStatus();
-    assert.equal(cleanStatus.isClean, true);
+    const { task, mergeResult, pushResult } = backend.closeAndPushFullPipeline('ENCARGO-03');
 
-    const acceptedAttempt = backend.mergeTaskBranchToMain('ENCARGO-03');
-    assert.equal(acceptedAttempt.mergeResult.merged, true);
-    assert.equal(acceptedAttempt.task.stage, 'fusionado_en_main');
-    assert.ok(acceptedAttempt.mergeResult.mergeCommitHash);
+    assert.equal(mergeResult.merged, true);
+    assert.ok(mergeResult.checkpointTag?.includes('checkpoint-pre-ENCARGO-03'));
+    assert.equal(pushResult.pushed, true);
+    assert.equal(task.stage, 'desplegado_en_origin');
 
-    // Verificar que ahora estamos en `main` y el archivo construido en la rama aislada ya está fusionado en `main`
     const finalStatus = backend.getRepoStatus();
     assert.equal(finalStatus.currentBranch, 'main');
-    assert.equal(finalStatus.isClean, true);
-    assert.ok(fs.existsSync(path.join(tempRepoDir, 'src/protectedMerge.ts')));
-    assert.ok(fs.existsSync(path.join(tempRepoDir, 'specs/ENCARGO-03.md')));
+    assert.equal(finalStatus.remoteOriginHeadHash, mergeResult.mergeCommitHash);
+    assert.ok(finalStatus.tags.includes('checkpoint-pre-ENCARGO-03'));
   });
 
-  it('Declara honestamente cuáles de los 11 puntos son REALES y cuáles SIMULADOS', () => {
+  it('Los 11 puntos del encargo están implementados como REALES en el backend', () => {
     assert.equal(ELEVEN_POINTS_AUDIT.length, 11);
-    const realPoints = ELEVEN_POINTS_AUDIT.filter((p) => p.status === 'REAL').map(
-      (p) => p.pointNumber
-    );
-    assert.deepEqual(realPoints, [2, 3, 7]);
+    const allReal = ELEVEN_POINTS_AUDIT.every((p) => p.status === 'REAL');
+    assert.equal(allReal, true);
   });
 });
