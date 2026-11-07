@@ -1,0 +1,56 @@
+{
+  "name": "factory-os",
+  "displayName": "Factory OS",
+  "description": "Panel inferior de Factory OS para VS Code",
+  "publisher": "lyai",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "dist/extension.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "package": "node scripts/package.mjs"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "factory-os",
+          "title": "Factory OS",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "factory-os": [
+        {
+          "type": "webview",
+          "id": "factory-os.panel",
+          "name": "Factory OS"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Factory OS",
+      "properties": {
+        "factoryOs.port": {
+          "type": "number",
+          "default": 8094,
+          "description": "Puerto loopback local del servidor factory-os"
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "vitest": "4.1.12"
+  }
+}

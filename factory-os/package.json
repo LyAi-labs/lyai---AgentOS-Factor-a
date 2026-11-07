@@ -7,13 +7,14 @@
   "workspaces": [
     "packages/shared",
     "apps/server",
-    "apps/web"
+    "apps/web",
+    "apps/vscode"
   ],
   "engines": {
     "node": ">=22.13"
   },
   "scripts": {
-    "build": "npm run build -w @factory-os/shared && npm run build -w @factory-os/server && npm run build -w @factory-os/web",
+    "build": "npm run build -w @factory-os/shared && npm run build -w @factory-os/server && npm run build -w @factory-os/web && npm run build -w apps/vscode",
     "typecheck": "npm run typecheck --workspaces",
     "lint": "eslint .",
     "test": "npm run test --workspaces",

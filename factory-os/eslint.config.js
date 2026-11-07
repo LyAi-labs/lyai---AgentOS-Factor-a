@@ -5,14 +5,14 @@ import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
-  { ignores: ['**/dist/**', '**/node_modules/**', 'artifacts/**', '**/coverage/**'] },
+  { ignores: ['**/dist/**', '**/node_modules/**', 'artifacts/**', '**/coverage/**', '**/media/**'] },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['eslint.config.js', 'scripts/*.mjs'],
+          allowDefaultProject: ['eslint.config.js', 'scripts/*.mjs', 'apps/*/scripts/*.mjs'],
         },
         tsconfigRootDir: import.meta.dirname,
       },
@@ -37,11 +37,11 @@ export default defineConfig(
     rules: { ...reactHooks.configs.recommended.rules },
   },
   {
-    files: ['scripts/**'],
+    files: ['**/scripts/**'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
   {
-    files: ['**/test/**', 'scripts/**', 'eslint.config.js'],
+    files: ['**/test/**', '**/scripts/**', 'eslint.config.js'],
     rules: {
       'no-console': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',

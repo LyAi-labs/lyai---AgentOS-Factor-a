@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { parseServerMessage } from '@factory-os/shared';
 import type { ClientMessage, ServerMessage } from '@factory-os/shared';
 import type { ConnectionStatus } from '../state/store';
+import { getVsCodeApi } from './transport';
 
 export const BACKOFF_BASE_MS = 500;
 export const BACKOFF_CAP_MS = 15_000;
@@ -29,6 +30,49 @@ export function useFactorySocket({ onMessage, onStatus }: Handlers): void {
   }, [onMessage, onStatus]);
 
   useEffect(() => {
+    const vscode = getVsCodeApi();
+
+    // Modo extensión de VS Code vía postMessage
+    if (vscode) {
+      let pingTimer: ReturnType<typeof setInterval> | null = null;
+
+      const messageListener = (event: MessageEvent<unknown>) => {
+        const data = event.data;
+        if (!data || typeof data !== 'object' || !('type' in data)) return;
+        const msg = data as
+          | { type: 'ws:message'; message: unknown }
+          | { type: 'ws:status'; status: ConnectionStatus };
+
+        if (msg.type === 'ws:message') {
+          // El host reenvía el mensaje del servidor parseado o en bruto
+          const parsed = typeof msg.message === 'string'
+            ? parseServerMessage(msg.message)
+            : parseServerMessage(JSON.stringify(msg.message));
+          if (parsed) handlers.current.onMessage(parsed);
+        } else {
+          handlers.current.onStatus(msg.status);
+          if (msg.status === 'open' && !pingTimer) {
+            pingTimer = setInterval(() => {
+              vscode.postMessage({ type: 'ws:send', message: { type: 'ping' } });
+            }, 20_000);
+          } else if (msg.status !== 'open' && pingTimer) {
+            clearInterval(pingTimer);
+            pingTimer = null;
+          }
+        }
+      };
+
+      window.addEventListener('message', messageListener);
+      vscode.postMessage({ type: 'ws:open' });
+
+      return () => {
+        if (pingTimer) clearInterval(pingTimer);
+        window.removeEventListener('message', messageListener);
+        vscode.postMessage({ type: 'ws:close' });
+      };
+    }
+
+    // Modo navegador estándar
     let socket: WebSocket | null = null;
     let attempt = 0;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
