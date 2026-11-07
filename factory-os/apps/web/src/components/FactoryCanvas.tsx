@@ -116,8 +116,8 @@ export function FactoryCanvas({ metrics, configs, selectedNodeId, theme, onSelec
         edges={edges}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.08 }}
-        minZoom={0.4}
+        fitViewOptions={{ padding: 0.04 }}
+        minZoom={0.08}
         maxZoom={2.5}
         nodesConnectable={false}
         nodesDraggable={false}
