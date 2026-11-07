@@ -6,6 +6,10 @@
  * - Approver es puerta de quórum con retrabajo hacia Builder (máx. MAX_REWORK).
  * - Los pasos humanos (Tu OK, Carril urgencia, Producción) esperan aprobación explícita salvo autoApprove.
  * - Todo cambio de estado pasa por las máquinas de estados puras (domain/stateMachine.ts).
+ * - Revisores emiten veredicto (aprobado/rechazado/blocked); Approver exige 4 de 4 aprobados (constitución O2).
+ *   Un revisor nunca se reintenta: si no responde cuenta como `blocked` (O9).
+ * - `blocked` o una parada manual paran la línea (O1): no arranca ningún paso hasta que un humano la reanude.
+ * - Las decisiones humanas y de gobierno se registran en una cadena de auditoría con hash.
  */
 import { randomUUID } from 'node:crypto';
 import {
@@ -18,12 +22,15 @@ import {
   PRIORITIES,
   REWORK_GATE,
   REWORK_TARGET,
+  REVIEWER_NODES,
   requireNode,
   topologicalOrder,
 } from '@factory-os/shared';
 import type {
   ActivityEvent,
   ActivityLevel,
+  AuditAction,
+  AuditEntry,
   Bottleneck,
   CreateTaskInput,
   EngineState,
@@ -40,6 +47,7 @@ import type {
   TaskView,
   WorkflowStepDef,
 } from '@factory-os/shared';
+import { AuditChain } from '../domain/audit.js';
 import { conflict, DomainError, notFound } from '../domain/errors.js';
 import { mustTransition, transitionStep, transitionTask } from '../domain/stateMachine.js';
 import type { StageExecutor, StagePlan } from './executor.js';
@@ -64,7 +72,13 @@ export interface EngineListener {
   onActivity?(event: ActivityEvent): void;
   onEngineChanged?(state: EngineState): void;
   onConfigChanged?(config: NodeConfig): void;
+  onAudit?(entry: AuditEntry): void;
 }
+
+/** Quién toma una decisión: una persona (por la API) o la automatización. */
+export type Actor = string;
+export const HUMAN_ACTOR: Actor = 'Ignacio';
+export const AUTO_ACTOR: Actor = 'autoApprove';
 
 export interface EngineSettings {
   running: boolean;
@@ -83,6 +97,8 @@ export interface EngineOptions {
   /** Tareas terminadas que se conservan en memoria (el histórico completo vive en la BD). */
   retainTerminal?: number;
   onListenerError?: (error: unknown) => void;
+  /** Cabeza de la cadena de auditoría persistida, para continuarla tras un reinicio. */
+  auditHead?: { seq: number; hash: string };
 }
 
 const LANE_RANK: Readonly<Record<Lane, number>> = { urgent: 0, express: 1, standard: 2 };
@@ -130,6 +146,8 @@ export class FactoryEngine {
   private readonly completions = new Ring<number>(2_000);
   private readonly cycleTimes = new Ring<number>(200);
   private readonly counters = { created: 0, completed: 0, errored: 0 };
+  private readonly auditChain: AuditChain;
+  private line: { stopped: boolean; reason: string | null; at: number | null } = { stopped: false, reason: null, at: null };
 
   constructor(options: EngineOptions) {
     this.rng = options.rng;
@@ -138,6 +156,7 @@ export class FactoryEngine {
     this.idFactory = options.idFactory ?? randomUUID;
     this.retainTerminal = options.retainTerminal ?? 500;
     this.onListenerError = options.onListenerError ?? (() => undefined);
+    this.auditChain = new AuditChain(options.auditHead);
     this.settings = {
       running: true,
       speed: 10,
@@ -188,6 +207,12 @@ export class FactoryEngine {
     this.evictTerminal();
   }
 
+  private audit(actor: Actor, action: AuditAction, taskId: string | null, nodeId: string | null, detail: string): void {
+    // `at` en ms enteros: entra en el hash y debe sobrevivir intacto al viaje por timestamptz.
+    const at = Math.round(this.simTime);
+    this.emit('onAudit', this.auditChain.append({ at, actor, action, taskId, nodeId, detail }));
+  }
+
   private log(level: ActivityLevel, message: string, taskId: string | null, nodeId: string | null): void {
     this.activitySeq += 1;
     const event: ActivityEvent = { id: this.activitySeq, at: this.simTime, level, taskId, nodeId, message };
@@ -204,20 +229,50 @@ export class FactoryEngine {
     return this.toView(task);
   }
 
-  approve(taskId: string, nodeId: string, decision: 'approve' | 'reject', note?: string): TaskView {
+  approve(
+    taskId: string,
+    nodeId: string,
+    decision: 'approve' | 'reject',
+    note?: string,
+    actor: Actor = HUMAN_ACTOR,
+  ): TaskView {
     const task = this.requireTask(taskId);
     const step = task.steps.get(nodeId);
     if (!step) throw notFound(`El paso ${nodeId} en la tarea ${taskId}`);
     if (step.status !== 'awaiting_approval') {
       throw conflict(`El paso ${nodeId} no espera aprobación (estado: ${step.status})`);
     }
-    this.resolveApproval(task, step, decision, note ?? null);
+    this.resolveApproval(task, step, decision, note ?? null, actor);
     this.dispatch();
     this.flushDirty();
     return this.toView(task);
   }
 
-  retry(taskId: string): TaskView {
+  /** Para la línea (O1). Idempotente: una segunda parada no cambia el motivo original. */
+  stopLine(reason: string, actor: Actor = HUMAN_ACTOR): EngineState {
+    if (!this.line.stopped) {
+      this.line = { stopped: true, reason, at: this.simTime };
+      this.audit(actor, 'line_stop', null, null, reason);
+      this.log('error', `LÍNEA PARADA: ${reason}`, null, null);
+      this.emit('onEngineChanged', this.getState());
+    }
+    return this.getState();
+  }
+
+  /** Reanuda la línea. Solo una persona puede hacerlo, y queda registrado con su nota. */
+  resumeLine(note: string, actor: Actor = HUMAN_ACTOR): EngineState {
+    if (!this.line.stopped) throw conflict('La línea no está parada');
+    this.audit(actor, 'line_resume', null, null, `${note} (motivo de la parada: ${this.line.reason ?? '—'})`);
+    this.line = { stopped: false, reason: null, at: null };
+    this.log('info', `Línea reanudada por ${actor}: ${note}`, null, null);
+    if (this.settings.autoApprove) this.approveAllPending(AUTO_ACTOR);
+    this.dispatch();
+    this.flushDirty();
+    this.emit('onEngineChanged', this.getState());
+    return this.getState();
+  }
+
+  retry(taskId: string, actor: Actor = HUMAN_ACTOR): TaskView {
     const task = this.requireTask(taskId);
     if (task.status !== 'error') throw conflict(`Solo se reintentan tareas en error (estado: ${task.status})`);
     Object.assign(task, mustTransition(transitionTask(task, { type: 'RETRY' }), `retry ${taskId}`));
@@ -230,34 +285,36 @@ export class FactoryEngine {
     this.unblockReady(task);
     this.touch(task);
     this.log('info', `Reintento manual de «${task.title}»`, task.id, null);
+    this.audit(actor, 'retry', task.id, null, `Reintento de «${task.title}»`);
     this.dispatch();
     this.flushDirty();
     return this.toView(task);
   }
 
-  updateNodeConfig(nodeId: string, patch: NodeConfigUpdate): NodeConfig {
+  updateNodeConfig(nodeId: string, patch: NodeConfigUpdate, actor: Actor = HUMAN_ACTOR): NodeConfig {
     const current = this.configs.get(nodeId);
     if (!current) throw notFound(`El nodo ${nodeId}`);
     const next: NodeConfig = { ...current, ...patch };
     this.configs.set(nodeId, next);
     this.emit('onConfigChanged', next);
     this.log('info', `Configuración de ${requireNode(nodeId).label} actualizada`, null, nodeId);
+    this.audit(actor, 'node_config', null, nodeId, JSON.stringify(patch));
     this.dispatch();
     this.flushDirty();
     return next;
   }
 
-  updateSettings(patch: Partial<EngineSettings>): EngineState {
+  updateSettings(patch: Partial<EngineSettings>, actor: Actor = HUMAN_ACTOR): EngineState {
     const rateChanged =
       patch.arrivalRatePerMin !== undefined && patch.arrivalRatePerMin !== this.settings.arrivalRatePerMin;
+    if (patch.autoApprove !== undefined && patch.autoApprove !== this.settings.autoApprove) {
+      // Delegar las aprobaciones humanas en la automatización es una decisión de gobierno: se audita.
+      this.audit(actor, 'engine_settings', null, null, `autoApprove=${String(patch.autoApprove)}`);
+    }
     this.settings = { ...this.settings, ...patch };
     if (rateChanged) this.nextArrivalAt = null;
-    if (patch.autoApprove === true) {
-      for (const task of this.tasks.values()) {
-        for (const step of task.steps.values()) {
-          if (step.status === 'awaiting_approval') this.resolveApproval(task, step, 'approve', 'autoApprove');
-        }
-      }
+    if (patch.autoApprove === true && !this.line.stopped) {
+      this.approveAllPending(AUTO_ACTOR);
       this.dispatch();
       this.flushDirty();
     }
@@ -314,7 +371,14 @@ export class FactoryEngine {
       for (const sv of view.steps) {
         // Un paso "running" perdió su ejecución con el proceso: vuelve a cola.
         const status = sv.status === 'running' ? 'queued' : sv.status;
-        steps.set(sv.nodeId, { ...sv, status, plan: null, finishAt: null });
+        steps.set(sv.nodeId, {
+          ...sv,
+          status,
+          verdict: sv.verdict ?? null,
+          findings: sv.findings,
+          plan: null,
+          finishAt: null,
+        });
       }
       if (order.some((id) => !steps.has(id))) continue; // flujo incompatible: se ignora
       const { steps: _ignored, ...rest } = view;
@@ -334,7 +398,17 @@ export class FactoryEngine {
   // ───────────────────────── Consultas ─────────────────────────
 
   getState(): EngineState {
-    return { ...this.settings, simTime: this.simTime };
+    return {
+      ...this.settings,
+      simTime: this.simTime,
+      lineStopped: this.line.stopped,
+      lineStopReason: this.line.reason,
+      lineStoppedAt: this.line.at,
+    };
+  }
+
+  getAuditHead(): { seq: number; hash: string } {
+    return this.auditChain.getHead();
   }
 
   getConfigs(): NodeConfig[] {
@@ -450,6 +524,8 @@ export class FactoryEngine {
         startedAt: null,
         finishedAt: null,
         error: null,
+        verdict: null,
+        findings: [],
         plan: null,
         finishAt: null,
       });
@@ -517,8 +593,8 @@ export class FactoryEngine {
       if (human) {
         step.queuedAt = this.simTime;
         this.awaitingOf(nodeId).add(task.id);
-        if (this.settings.autoApprove) {
-          this.resolveApproval(task, step, 'approve', 'autoApprove');
+        if (this.settings.autoApprove && !this.line.stopped) {
+          this.resolveApproval(task, step, 'approve', 'autoApprove', AUTO_ACTOR);
         } else {
           this.log('warn', `«${task.title}» espera aprobación en ${requireNode(nodeId).label}`, task.id, nodeId);
         }
@@ -528,13 +604,23 @@ export class FactoryEngine {
     }
   }
 
+  private approveAllPending(actor: Actor): void {
+    for (const task of this.tasks.values()) {
+      for (const step of task.steps.values()) {
+        if (step.status === 'awaiting_approval') this.resolveApproval(task, step, 'approve', 'autoApprove', actor);
+      }
+    }
+  }
+
   private resolveApproval(
     task: TaskRuntime,
     step: StepRuntime,
     decision: 'approve' | 'reject',
     note: string | null,
+    actor: Actor,
   ): void {
     const node = requireNode(step.nodeId);
+    this.audit(actor, decision, task.id, node.id, `${node.label} · «${task.title}»${note ? ` · ${note}` : ''}`);
     const waited = this.simTime - (step.queuedAt ?? this.simTime);
     this.awaitingOf(step.nodeId).delete(task.id);
     step.startedAt = step.queuedAt;
@@ -557,6 +643,7 @@ export class FactoryEngine {
   }
 
   private dispatch(): void {
+    if (this.line.stopped) return; // O1: con la línea parada no arranca ningún paso; los que corren terminan.
     for (const node of NODES) {
       if (node.role === 'human' || node.role === 'resource') continue;
       const queue = this.queueOf(node.id);
@@ -646,15 +733,22 @@ export class FactoryEngine {
     step.plan = null;
     const duration = (step.finishedAt ?? this.simTime) - (step.startedAt ?? this.simTime);
     const wait = (step.startedAt ?? this.simTime) - (step.queuedAt ?? this.simTime);
-    const success = plan.outcome === 'success';
+    if (REVIEWER_NODES.has(node.id)) {
+      this.finishReview(task, step, plan, duration, wait);
+      this.touch(task);
+      return;
+    }
+    const negatives = node.id === REWORK_GATE ? this.negativeVerdicts(task) : [];
+    const success = plan.outcome === 'success' && negatives.length === 0;
     this.requireStats(node.id).record(duration, wait, success);
-    this.recordRun(task, step, success ? 'success' : 'failure', plan.error);
+    const quorumError = negatives.length > 0 ? `Quórum no alcanzado: ${negatives.join(' · ')}` : null;
+    this.recordRun(task, step, success ? 'success' : node.id === REWORK_GATE ? 'rejected' : 'failure', quorumError ?? plan.error);
 
     if (success) {
       this.applyStep(task, step, { type: 'SUCCEED' });
       if (task.status !== 'error') this.afterStepDone(task);
     } else if (node.id === REWORK_GATE) {
-      this.handleRejection(task, step, plan.error ?? 'Rechazo de Approver');
+      this.handleRejection(task, step, quorumError ?? plan.error ?? 'Rechazo de Approver');
     } else {
       const error = plan.error ?? `Fallo en ${node.label}`;
       this.applyStep(task, step, { type: 'FAIL', error, maxAttempts: MAX_ATTEMPTS });
@@ -666,6 +760,52 @@ export class FactoryEngine {
       }
     }
     this.touch(task);
+  }
+
+  /**
+   * Un revisor termina siempre su paso (hizo su trabajo) y deja un veredicto. "No respondió" = blocked (O9).
+   * blocked para la línea (O1). Sin Approver en el flujo (urgencia, revisión a posteriori), un veredicto
+   * negativo lleva la tarea a error y también para la línea: el cambio ya está en producción.
+   */
+  private finishReview(task: TaskRuntime, step: StepRuntime, plan: StagePlan, duration: number, wait: number): void {
+    const node = requireNode(step.nodeId);
+    const verdict = plan.outcome === 'failure' ? 'blocked' : (plan.verdict ?? 'blocked');
+    const findings = plan.findings ?? [];
+    const error =
+      verdict === 'aprobado'
+        ? null
+        : plan.outcome === 'failure'
+          ? `No respondió: ${plan.error ?? 'sin respuesta'} (cuenta como blocked)`
+          : (plan.error ?? findings.find((f) => f.bloquea)?.detalle ?? 'Sin evidencia');
+    this.requireStats(node.id).record(duration, wait, verdict === 'aprobado');
+    this.recordRun(task, step, verdict === 'aprobado' ? 'success' : verdict === 'rechazado' ? 'rejected' : 'blocked', error);
+    this.applyStep(task, step, { type: 'SUCCEED' });
+    step.verdict = verdict;
+    step.findings = findings;
+    step.error = error;
+    if (verdict !== 'aprobado') {
+      this.log('warn', `${node.label}: ${verdict} «${task.title}» — ${error ?? ''}`, task.id, node.id);
+    }
+    if (verdict === 'blocked') this.stopLine(`${node.label} devolvió blocked en «${task.title}»: ${error ?? ''}`, 'motor');
+    if (task.status === 'error') return;
+    const hasGate = task.steps.has(REWORK_GATE);
+    if (!hasGate && verdict !== 'aprobado') {
+      if (verdict === 'rechazado') this.stopLine(`${node.label} rechaza a posteriori «${task.title}»: ${error ?? ''}`, 'motor');
+      this.failTask(task, `${node.label}: ${verdict} — ${error ?? ''}`);
+      return;
+    }
+    this.afterStepDone(task);
+  }
+
+  /** Revisores ya terminados con veredicto distinto de aprobado (bloquean el quórum). */
+  private negativeVerdicts(task: TaskRuntime): string[] {
+    const out: string[] = [];
+    for (const step of task.steps.values()) {
+      if (step.verdict !== null && step.verdict !== 'aprobado') {
+        out.push(`${requireNode(step.nodeId).label} ${step.verdict}`);
+      }
+    }
+    return out;
   }
 
   private handleRejection(task: TaskRuntime, gate: StepRuntime, error: string): void {
@@ -683,6 +823,8 @@ export class FactoryEngine {
       if (step.status === 'running') continue; // no ocurre en flujos válidos; defensivo
       this.detach(task.id, nodeId);
       this.applyStep(task, step, { type: 'RESET' });
+      step.verdict = null;
+      step.findings = [];
     }
     this.log('warn', `Approver rechaza «${task.title}»: retrabajo ${task.reworkCount}/${MAX_REWORK} → Builder`, task.id, REWORK_GATE);
     this.unblockReady(task);

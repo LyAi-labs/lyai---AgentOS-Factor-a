@@ -96,4 +96,37 @@ CREATE INDEX stage_runs_task_idx ON stage_runs(task_id);
 CREATE INDEX stage_runs_node_finished_idx ON stage_runs(node_id, finished_at DESC);
 `,
   },
+  {
+    id: 2,
+    name: 'verdicts-and-audit',
+    sql: `
+ALTER TABLE task_steps ADD COLUMN verdict TEXT CHECK (verdict IN ('aprobado','rechazado','blocked'));
+ALTER TABLE task_steps ADD COLUMN findings JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+ALTER TABLE stage_runs DROP CONSTRAINT stage_runs_outcome_check;
+ALTER TABLE stage_runs ADD CONSTRAINT stage_runs_outcome_check
+  CHECK (outcome IN ('success','failure','approved','rejected','blocked'));
+
+-- Registro de auditoría encadenado por hash. Solo inserción: los triggers impiden UPDATE y DELETE.
+CREATE TABLE audit_log (
+  seq        BIGINT PRIMARY KEY CHECK (seq >= 1),
+  at         TIMESTAMPTZ NOT NULL,
+  actor      TEXT NOT NULL,
+  action     TEXT NOT NULL CHECK (action IN ('approve','reject','retry','line_stop','line_resume','node_config','engine_settings')),
+  task_id    UUID,
+  node_id    TEXT REFERENCES nodes(id),
+  detail     TEXT NOT NULL,
+  prev_hash  CHAR(64) NOT NULL,
+  hash       CHAR(64) NOT NULL UNIQUE
+);
+
+CREATE FUNCTION audit_log_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'audit_log es de solo inserción';
+END;
+$$;
+CREATE TRIGGER audit_log_no_update BEFORE UPDATE OR DELETE ON audit_log
+  FOR EACH ROW EXECUTE FUNCTION audit_log_append_only();
+`,
+  },
 ];

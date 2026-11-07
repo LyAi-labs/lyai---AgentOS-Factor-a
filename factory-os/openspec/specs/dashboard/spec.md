@@ -36,3 +36,10 @@ The canvas SHALL offer guided views (one per lane/kind route) that highlight the
 #### Scenario: carril exprés
 - **WHEN** the express guided view is selected
 - **THEN** `carril_expres`, `builder` and `approver` are highlighted, `spec_writer` is dimmed, and only edges between highlighted nodes stay highlighted
+
+### Requirement: UI-006 Línea parada, veredictos e impacto
+When the line is stopped the dashboard SHALL show a banner with the reason and a resume form that requires a note, and the top bar SHALL offer a manual stop (andon). Task detail SHALL show each reviewer's verdict and findings (blocking or not). The node inspector SHALL show the downstream impact: reachable nodes, affected layers and open tasks still pending at that node.
+
+#### Scenario: banner
+- **WHEN** the engine state reports `lineStopped: true`
+- **THEN** the banner shows the reason and the resume button, and nothing renders when the line runs

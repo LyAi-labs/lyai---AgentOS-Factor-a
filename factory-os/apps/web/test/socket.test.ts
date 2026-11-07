@@ -17,7 +17,7 @@ describe('dashboard connection', () => {
     expect(socketUrl({ protocol: 'https:', host: 'lyai.pro' })).toBe('wss://lyai.pro/ws');
     expect(socketUrl({ protocol: 'http:', host: 'localhost:5173' })).toBe('ws://localhost:5173/ws');
 
-    const engine = { running: true, speed: 1, arrivalRatePerMin: 0, autoApprove: false, simTime: 0 };
+    const engine = { running: true, speed: 1, arrivalRatePerMin: 0, autoApprove: false, simTime: 0, lineStopped: false, lineStopReason: null, lineStoppedAt: null };
     const stale = reducer(initialState, { type: 'server', message: { type: 'tasks', tasks: [task('viejo', 1)] } });
     const fresh = reducer(stale, {
       type: 'server',

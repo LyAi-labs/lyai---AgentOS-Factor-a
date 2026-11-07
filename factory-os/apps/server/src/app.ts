@@ -7,16 +7,20 @@ import type { FastifyInstance, FastifyServerOptions } from 'fastify';
 import { z, ZodError } from 'zod';
 import {
   approvalSchema,
+  auditQuerySchema,
   createTaskSchema,
   EDGES,
   engineUpdateSchema,
   getNode,
   LAYERS,
+  lineResumeSchema,
+  lineStopSchema,
   listTasksQuerySchema,
   nodeConfigUpdateSchema,
   NODES,
 } from '@factory-os/shared';
 import type { ApiErrorBody, GraphPayload } from '@factory-os/shared';
+import { verifyChain } from './domain/audit.js';
 import { DomainError, notFound } from './domain/errors.js';
 import { WsHub } from './api/wsHub.js';
 import type { WsHubOptions } from './api/wsHub.js';
@@ -146,6 +150,21 @@ export function buildApp({ runtime, logger = false, ws }: BuildAppOptions): Fact
   app.get('/api/engine', async () => engine.getState());
   app.patch('/api/engine', async (req) => engine.updateSettings(engineUpdateSchema.parse(req.body)));
   app.get('/api/activity', async () => engine.getActivity());
+
+  // ─── Línea (constitución O1) ───
+  app.post('/api/line/stop', async (req) => engine.stopLine(lineStopSchema.parse(req.body).reason));
+  app.post('/api/line/resume', async (req) => engine.resumeLine(lineResumeSchema.parse(req.body).note));
+
+  // ─── Auditoría encadenada ───
+  app.get('/api/audit', async (req) => {
+    const { limit } = auditQuerySchema.parse(req.query);
+    await runtime.writer.flush();
+    return runtime.repo.listAudit(limit);
+  });
+  app.get('/api/audit/verify', async () => {
+    await runtime.writer.flush();
+    return verifyChain(await runtime.repo.listAudit());
+  });
 
   return { app, hub };
 }

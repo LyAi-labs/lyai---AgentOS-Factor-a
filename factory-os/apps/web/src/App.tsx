@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
 import type { ServerMessage } from '@factory-os/shared';
 import { FactoryCanvas } from './components/FactoryCanvas';
+import { LineBanner } from './components/LineBanner';
 import type { Theme } from './components/FactoryCanvas';
 import { SidePanel } from './components/SidePanel';
 import { TopBar } from './components/TopBar';
@@ -47,6 +48,7 @@ export function App() {
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
       />
+      <LineBanner engine={state.engine} />
       <main className="workspace">
         <FactoryCanvas
           metrics={state.metrics?.nodes ?? []}

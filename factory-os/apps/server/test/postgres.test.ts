@@ -8,6 +8,7 @@ import { EDGES, LAYERS, NODES, reachableFrom } from '@factory-os/shared';
 import type { StageRunRecord, TaskView } from '@factory-os/shared';
 import { PostgresRepository } from '../src/persistence/postgresRepository.js';
 import { makeEngine, runUntil, ScriptedExecutor } from './helpers.js';
+import { AuditChain, verifyChain } from '../src/domain/audit.js';
 
 const url = process.env.TEST_DATABASE_URL;
 
@@ -67,5 +68,22 @@ describe.skipIf(!url)('persistence (PostgreSQL)', () => {
     for (const node of NODES) {
       expect(await repo.reachable(node.id), node.id).toEqual(reachableFrom(node.id));
     }
+  });
+
+  it('[PER-004] auditoría de solo inserción y cadena continua tras reinicio', async () => {
+    const draft = (n: number) => ({ at: 1_794_000_000_000 + n, actor: 'Ignacio', action: 'approve' as const, taskId: null, nodeId: 'tu_ok', detail: `decisión ${n}` });
+    const first = new AuditChain((await repo.loadAuditHead()) ?? undefined);
+    await repo.persistBatch([], [], [first.append(draft(1)), first.append(draft(2))]);
+    // "reinicio": una cadena nueva retoma desde la cabeza persistida
+    const second = new AuditChain((await repo.loadAuditHead()) ?? undefined);
+    await repo.persistBatch([], [], [second.append(draft(3))]);
+    const all = await repo.listAudit();
+    expect(all.map((a) => a.seq)).toEqual([1, 2, 3]);
+    expect(verifyChain(all)).toMatchObject({ ok: true });
+    const admin = new pg.Client({ connectionString: url });
+    await admin.connect();
+    await expect(admin.query("UPDATE audit_log SET detail = 'x' WHERE seq = 1")).rejects.toThrow(/solo inserción/);
+    await expect(admin.query('DELETE FROM audit_log WHERE seq = 1')).rejects.toThrow(/solo inserción/);
+    await admin.end();
   });
 });

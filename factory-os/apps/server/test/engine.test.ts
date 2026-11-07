@@ -99,14 +99,15 @@ describe('engine', () => {
   });
 
   it('[ENG-006] rechazo humano y fallo agotado llevan a error; retry reanuda', () => {
-    const exec = new ScriptedExecutor({}, { verificador: 3 });
+    const exec = new ScriptedExecutor({}, { builder: 3 });
     const engine = makeEngine(exec);
     const { id } = engine.createTask(standard);
     runUntil(engine, () => isTerminal(engine.getTask(id)));
     const failed = engine.getTask(id);
     expect(failed?.status).toBe('error');
-    expect(failed?.lastError).toMatch(/Verificador/);
-    expect(stepOf(failed, 'verificador').status).toBe('failed');
+    expect(failed?.lastError).toMatch(/Builder/);
+    expect(stepOf(failed, 'builder').status).toBe('failed');
+    expect(exec.callsFor(failed?.id ?? '', 'builder')).toBe(3);
     expect(() => engine.retry(id)).not.toThrow();
     runUntil(engine, () => isTerminal(engine.getTask(id)));
     expect(engine.getTask(id)?.status).toBe('completed');
@@ -213,5 +214,78 @@ describe('engine', () => {
     expect(builder?.avgDurationMs).toBeGreaterThan(0);
     expect(m.nodes.find((n) => n.nodeId === 'brain')?.accesses).toBeGreaterThan(0);
     expect(m.totals.wip + m.totals.completed + m.totals.errored).toBe(m.totals.created);
+  });
+});
+
+describe('engine · constitución (O1, O2, O9)', () => {
+  it('[ENG-012] veredictos: un rechazo provoca retrabajo, un revisor nunca se reintenta y el estilo no bloquea', () => {
+    const exec = new ScriptedExecutor({}, {}, 1_000, { seguridad: ['rechazado'] });
+    const engine = makeEngine(exec);
+    const { id } = engine.createTask(standard);
+    runUntil(engine, () => engine.getTask(id)?.reworkCount === 1);
+    expect(exec.callsFor(id, 'seguridad')).toBe(1);
+    const activity = engine.getActivity().map((e) => e.message).join('\n');
+    expect(activity).toMatch(/Quórum no alcanzado: Seguridad rechazado|Approver rechaza/);
+    runUntil(engine, () => engine.getTask(id)?.status === 'completed');
+    expect(exec.callsFor(id, 'builder')).toBe(2);
+    expect(exec.callsFor(id, 'seguridad')).toBe(2);
+    expect(stepOf(engine.getTask(id), 'seguridad').verdict).toBe('aprobado');
+
+    // Exprés: quórum 2/2
+    const ex = new ScriptedExecutor({}, {}, 1_000, { verificador: ['rechazado', 'rechazado', 'rechazado'] });
+    const e2 = makeEngine(ex);
+    const t2 = e2.createTask(express);
+    runUntil(e2, () => e2.getTask(t2.id)?.status === 'error');
+    expect(e2.getTask(t2.id)?.lastError).toMatch(/retrabajo agotado/);
+    expect(ex.callsFor(t2.id, 'verificador')).toBe(3);
+  });
+
+  it('[ENG-012] un estilo no bloquea: aprobado con hallazgo no bloqueante pasa el quórum', async () => {
+    const { SimulatedExecutor: Sim } = await import('../src/engine/executor.js');
+    const { createRng: rngOf } = await import('../src/engine/random.js');
+    const sim = new Sim(rngOf(3));
+    const node = NODES.find((n) => n.id === 'codigo');
+    if (!node) throw new Error('falta codigo');
+    let styleOnly = 0;
+    for (let i = 0; i < 300; i++) {
+      const plan = sim.plan(node, { nodeId: 'codigo', capacity: 1, baseDurationMs: 1, failureRate: 0 });
+      expect(plan.verdict).toBe('aprobado');
+      if (plan.findings?.some((f) => f.categoria === 'estilo' && !f.bloquea)) styleOnly += 1;
+    }
+    expect(styleOnly).toBeGreaterThan(0);
+  });
+
+  it('[ENG-013] blocked para la línea; nada arranca hasta reanudar; reanudar sin parada es conflicto', () => {
+    const exec = new ScriptedExecutor({}, {}, 1_000, { codigo: ['blocked'] });
+    const engine = makeEngine(exec);
+    const { id } = engine.createTask(standard);
+    runUntil(engine, () => engine.getState().lineStopped);
+    expect(engine.getState().lineStopReason).toMatch(/Código devolvió blocked/);
+    const other = engine.createTask(express);
+    engine.tick(3_600_000);
+    expect(stepOf(engine.getTask(other.id), 'entradas').status).toBe('queued');
+    expect(stepOf(engine.getTask(id), 'codigo').verdict).toBe('blocked');
+
+    engine.resumeLine('revisado: el revisor ya responde');
+    expect(engine.getState().lineStopped).toBe(false);
+    runUntil(engine, () => engine.getTask(other.id)?.status === 'completed');
+    runUntil(engine, () => engine.getTask(id)?.status === 'completed');
+    expect(engine.getTask(id)?.reworkCount).toBe(1);
+    expect(() => engine.resumeLine('otra vez')).toThrow(/no está parada/);
+
+    // Parada manual: las aprobaciones automáticas también esperan
+    engine.stopLine('andon manual');
+    const third = engine.createTask(express);
+    engine.tick(600_000);
+    expect(engine.getTask(third.id)?.steps.every((s) => s.status !== 'done')).toBe(true);
+  });
+
+  it('[ENG-013] revisión a posteriori negativa en urgencia: tarea en error y línea parada', () => {
+    const exec = new ScriptedExecutor({}, {}, 1_000, { seguridad: ['rechazado'] });
+    const engine = makeEngine(exec);
+    const { id } = engine.createTask({ ...express, lane: 'urgent' });
+    runUntil(engine, () => engine.getTask(id)?.status === 'error');
+    expect(engine.getState().lineStopped).toBe(true);
+    expect(engine.getState().lineStopReason).toMatch(/a posteriori/);
   });
 });

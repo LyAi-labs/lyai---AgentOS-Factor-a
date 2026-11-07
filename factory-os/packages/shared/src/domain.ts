@@ -55,6 +55,24 @@ export const STEP_STATUSES = [
 ] as const;
 export type StepStatus = (typeof STEP_STATUSES)[number];
 
+/**
+ * Veredicto de un revisor (contrato de lyai-factory, docs/contratos/veredicto.md):
+ * aprobado = evidencia y ningún hallazgo que bloquee; rechazado = al menos un hallazgo que bloquea;
+ * blocked = no se pudo revisar (cuenta como rechazo y para la línea, constitución O1/O9).
+ */
+export const VERDICTS = ['aprobado', 'rechazado', 'blocked'] as const;
+export type Verdict = (typeof VERDICTS)[number];
+
+/** Solo bloquean corrección, seguridad y uso real; el estilo nunca bloquea (constitución O2). */
+export const FINDING_CATEGORIES = ['correccion', 'seguridad', 'ux', 'estilo'] as const;
+export type FindingCategory = (typeof FINDING_CATEGORIES)[number];
+
+export interface Finding {
+  categoria: FindingCategory;
+  bloquea: boolean;
+  detalle: string;
+}
+
 /** Estado operativo derivado de un nodo, usado para colorear el lienzo. */
 export const NODE_HEALTH = ['idle', 'running', 'blocked', 'error'] as const;
 export type NodeHealth = (typeof NODE_HEALTH)[number];
@@ -113,6 +131,9 @@ export interface StepView {
   startedAt: number | null;
   finishedAt: number | null;
   error: string | null;
+  /** Solo en pasos de revisor: veredicto del último intento. */
+  verdict: Verdict | null;
+  findings: Finding[];
 }
 
 export interface TaskView {
@@ -202,6 +223,10 @@ export interface EngineState {
   arrivalRatePerMin: number;
   autoApprove: boolean;
   simTime: number;
+  /** Línea parada (constitución O1): no arranca ningún paso nuevo hasta que un humano la reanude. */
+  lineStopped: boolean;
+  lineStopReason: string | null;
+  lineStoppedAt: number | null;
 }
 
 export type ActivityLevel = 'info' | 'warn' | 'error';
@@ -215,7 +240,7 @@ export interface ActivityEvent {
   message: string;
 }
 
-export const STAGE_OUTCOMES = ['success', 'failure', 'approved', 'rejected'] as const;
+export const STAGE_OUTCOMES = ['success', 'failure', 'approved', 'rejected', 'blocked'] as const;
 export type StageOutcome = (typeof STAGE_OUTCOMES)[number];
 
 /** Registro inmutable de un intento de paso: base de la telemetría histórica. */
@@ -229,4 +254,31 @@ export interface StageRunRecord {
   finishedAt: number;
   outcome: StageOutcome;
   error: string | null;
+}
+
+export const AUDIT_ACTIONS = [
+  'approve',
+  'reject',
+  'retry',
+  'line_stop',
+  'line_resume',
+  'node_config',
+  'engine_settings',
+] as const;
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+
+/**
+ * Entrada del registro de auditoría, encadenada por hash: hash = SHA-256(prevHash + contenido canónico).
+ * Alterar o borrar una entrada rompe la cadena desde ese punto (evidencia de manipulación).
+ */
+export interface AuditEntry {
+  seq: number;
+  at: number;
+  actor: string;
+  action: AuditAction;
+  taskId: string | null;
+  nodeId: string | null;
+  detail: string;
+  prevHash: string;
+  hash: string;
 }

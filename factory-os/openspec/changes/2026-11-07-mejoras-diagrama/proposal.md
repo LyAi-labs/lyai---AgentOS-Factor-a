@@ -3,7 +3,9 @@
 Propuestas sobre el diagrama de referencia, detectadas al convertirlo en un motor ejecutable. Ninguna está aplicada:
 `openspec/specs/` refleja el diagrama tal cual. Cada una indica el delta que supondría.
 
-## 1. Approver: separar "quórum" de "juicio"
+## 1. Approver: separar "quórum" de "juicio" — PARCIALMENTE APLICADO (2026-11-07)
+Aplicado, por alineación con la constitución (O2, O9): el quórum ya lo deciden los veredictos de los revisores
+(ENG-012). Sigue pendiente decidir si Approver conserva su propio juicio de modelo (hoy sí, con tasa configurable).
 **Hoy:** Approver (Sonnet 5.5 · 4/4) es a la vez la puerta de quórum y un modelo que puede rechazar (15 % en la simulación).
 Si los 4 votos ya son verdes, un rechazo del propio Approver gasta un retrabajo completo (Builder + 4 revisiones).
 **Propuesta:** Approver = puerta determinista que solo agrega votos; el juicio de modelo pasa a ser un 5.º voto paralelo.

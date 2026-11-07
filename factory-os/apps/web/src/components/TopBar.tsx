@@ -95,6 +95,18 @@ export function TopBar({ connection, engine, metrics, theme, onToggleTheme }: Pr
             />
             Auto-OK
           </label>
+          <button
+            type="button"
+            className="btn btn--danger"
+            disabled={action.busy || engine.lineStopped}
+            title="Andon: para la línea (constitución O1)"
+            onClick={() => {
+              const reason = window.prompt('Motivo de la parada de línea');
+              if (reason && reason.trim().length >= 3) void action.run(() => api.stopLine(reason.trim()));
+            }}
+          >
+            ■ Parar línea
+          </button>
           <button type="button" className="btn" onClick={onToggleTheme} aria-label="Cambiar tema">
             {theme === 'dark' ? '☾ Oscuro' : '☀ Claro'}
           </button>

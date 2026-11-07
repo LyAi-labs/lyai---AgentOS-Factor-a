@@ -51,6 +51,10 @@ export const nodeConfigUpdateSchema = z
   .refine((v) => Object.keys(v).length > 0, { message: 'Se requiere al menos un campo' });
 export type NodeConfigUpdate = z.infer<typeof nodeConfigUpdateSchema>;
 
+export const lineStopSchema = z.object({ reason: z.string().trim().min(3).max(300) });
+export const lineResumeSchema = z.object({ note: z.string().trim().min(3).max(300) });
+export const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(1000).default(200) });
+
 export const approvalSchema = z.object({
   nodeId: z.string().min(1),
   decision: z.enum(['approve', 'reject']),

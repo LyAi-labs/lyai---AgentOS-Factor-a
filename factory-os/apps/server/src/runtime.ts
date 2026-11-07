@@ -42,7 +42,11 @@ export class FactoryRuntime {
   private readonly now: () => number;
   private readonly startedAt: number;
 
-  private constructor(options: RuntimeOptions, configs: readonly NodeConfig[]) {
+  private constructor(
+    options: RuntimeOptions,
+    configs: readonly NodeConfig[],
+    auditHead: { seq: number; hash: string } | null,
+  ) {
     this.repo = options.repo;
     this.logger = options.logger;
     this.tickMs = options.tickMs ?? 100;
@@ -54,6 +58,7 @@ export class FactoryRuntime {
       executor: options.executor ?? new SimulatedExecutor(rng),
       startTime: this.now(),
       configs,
+      ...(auditHead ? { auditHead } : {}),
       ...(options.settings ? { settings: options.settings } : {}),
       onListenerError: (error) => this.logger.error({ err: error }, 'listener del motor falló'),
     });
@@ -63,6 +68,7 @@ export class FactoryRuntime {
     this.engine.subscribe({
       onTaskChanged: (task) => this.writer.enqueueTask(task),
       onStageRun: (run) => this.writer.enqueueRun(run),
+      onAudit: (entry) => this.writer.enqueueAudit(entry),
     });
   }
 
@@ -71,7 +77,7 @@ export class FactoryRuntime {
     await repo.migrate();
     await repo.seedTopology(LAYERS, NODES, EDGES);
     const configs = await repo.loadNodeConfigs();
-    const runtime = new FactoryRuntime(options, configs);
+    const runtime = new FactoryRuntime(options, configs, await repo.loadAuditHead());
     const open = await repo.loadOpenTasks();
     const restored = runtime.engine.restore(open);
     logger.info({ storage: repo.kind, restored }, 'runtime listo');

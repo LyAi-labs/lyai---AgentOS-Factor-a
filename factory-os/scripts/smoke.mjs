@@ -73,6 +73,23 @@ try {
   await page.screenshot({ path: `${OUT}node-inspector.png` });
   check('Inspector de nodo', true);
 
+  // Gobierno: andon (O1) → banner → reanudar con nota → auditoría íntegra
+  page.once('dialog', (d) => void d.accept('Smoke: parada de prueba'));
+  await page.getByRole('button', { name: /Parar línea/ }).click();
+  await page.locator('.line-banner').waitFor({ timeout: 5_000 });
+  check('Andon para la línea y muestra el banner', (await page.locator('.line-banner').textContent())?.includes('Smoke: parada de prueba') === true);
+  await page.screenshot({ path: `${OUT}line-stopped.png` });
+  await page.getByLabel('Nota de reanudación').fill('Smoke: revisado');
+  await page.getByRole('button', { name: 'Reanudar línea' }).click();
+  await page.locator('.line-banner').waitFor({ state: 'detached', timeout: 5_000 });
+  check('Reanudar línea con nota', true);
+  await page.getByRole('tab', { name: 'Actividad' }).click();
+  await page.getByRole('button', { name: /verificar/i }).click();
+  await page.locator('.audit__ok, .audit .error-text').first().waitFor({ timeout: 5_000 });
+  const auditText = (await page.locator('.audit').textContent()) ?? '';
+  check('Auditoría encadenada íntegra', auditText.includes('Cadena íntegra') && auditText.includes('para la línea') && auditText.includes('reanuda la línea'), auditText.match(/Cadena[^·]*· \d+ entradas/)?.[0] ?? auditText.slice(0, 80));
+  await page.screenshot({ path: `${OUT}audit.png` });
+
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
   await mobile.goto(BASE_URL, { waitUntil: 'networkidle' });
   await mobile.getByText('En vivo').waitFor({ timeout: 10_000 });

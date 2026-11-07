@@ -1,4 +1,5 @@
-import type { NodeConfig, NodeDef, TaskView } from '@factory-os/shared';
+import { REVIEWER_NODES } from '@factory-os/shared';
+import type { NodeConfig, NodeDef, TaskView, Verdict } from '@factory-os/shared';
 import { FactoryEngine } from '../src/engine/engine.js';
 import type { EngineOptions } from '../src/engine/engine.js';
 import type { StageExecutor, StagePlan } from '../src/engine/executor.js';
@@ -6,7 +7,8 @@ import { createRng } from '../src/engine/random.js';
 
 /**
  * Ejecutor guionizado: duraciones fijas por nodo y "falla las N primeras veces" por (tarea, nodo).
- * Permite tests deterministas sin depender de probabilidades.
+ * Revisores: aprueban por defecto; `verdicts[nodo]` guioniza el veredicto de cada llamada (n-ésima)
+ * y `failures[nodo]` simula que el revisor no responde (el motor lo trata como blocked).
  */
 export class ScriptedExecutor implements StageExecutor {
   readonly calls = new Map<string, number>();
@@ -15,6 +17,7 @@ export class ScriptedExecutor implements StageExecutor {
     private readonly durations: Record<string, number> = {},
     private readonly failures: Record<string, number> = {},
     private readonly defaultDuration = 1_000,
+    private readonly verdicts: Record<string, Verdict[]> = {},
   ) {}
 
   plan(node: NodeDef, _config: NodeConfig, taskId: string): StagePlan {
@@ -22,6 +25,18 @@ export class ScriptedExecutor implements StageExecutor {
     const n = (this.calls.get(key) ?? 0) + 1;
     this.calls.set(key, n);
     const durationMs = this.durations[node.id] ?? this.defaultDuration;
+    if (REVIEWER_NODES.has(node.id) && n > (this.failures[node.id] ?? 0)) {
+      const verdict = this.verdicts[node.id]?.[n - 1] ?? 'aprobado';
+      return verdict === 'aprobado'
+        ? { durationMs, outcome: 'success', error: null, verdict, findings: [] }
+        : {
+            durationMs,
+            outcome: 'success',
+            error: `hallazgo guionizado ${node.id}#${n}`,
+            verdict,
+            findings: [{ categoria: 'correccion', bloquea: true, detalle: `hallazgo ${node.id}#${n}` }],
+          };
+    }
     return n <= (this.failures[node.id] ?? 0)
       ? { durationMs, outcome: 'failure', error: `fallo guionizado ${node.id}#${n}` }
       : { durationMs, outcome: 'success', error: null };

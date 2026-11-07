@@ -197,3 +197,38 @@ describe('api', () => {
     expect(runtime.engine.getState().simTime).toBe(t0 + 4_000);
   });
 });
+
+describe('api · línea y auditoría', () => {
+  it('[API-007] parada manual y reanudación por API', async () => {
+    const stop = await factory.app.inject({ method: 'POST', url: '/api/line/stop', payload: { reason: 'andon: revisar BD' } });
+    expect(stop.statusCode).toBe(200);
+    const state = (await factory.app.inject({ method: 'GET', url: '/api/engine' })).json();
+    expect(state).toMatchObject({ lineStopped: true, lineStopReason: 'andon: revisar BD' });
+    expect((await factory.app.inject({ method: 'POST', url: '/api/line/resume', payload: { note: 'x' } })).statusCode).toBe(400);
+    const resume = await factory.app.inject({ method: 'POST', url: '/api/line/resume', payload: { note: 'BD revisada' } });
+    expect(resume.json()).toMatchObject({ lineStopped: false, lineStopReason: null });
+    const again = await factory.app.inject({ method: 'POST', url: '/api/line/resume', payload: { note: 'BD revisada' } });
+    expect(again.statusCode).toBe(409);
+  });
+
+  it('[API-008] cadena de auditoría: actores, verificación y detección de manipulación', async () => {
+    const task = (await createTask({ title: 'Tarea auditada', lane: 'express' })).json<TaskView>();
+    runUntil(runtime.engine, () => stepOf(runtime.engine.getTask(task.id), 'tu_ok').status === 'awaiting_approval');
+    await factory.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/approval`, payload: { nodeId: 'tu_ok', decision: 'approve' } });
+    await factory.app.inject({ method: 'POST', url: '/api/line/stop', payload: { reason: 'prueba de auditoría' } });
+    await factory.app.inject({ method: 'POST', url: '/api/line/resume', payload: { note: 'fin de la prueba' } });
+    await factory.app.inject({ method: 'PATCH', url: '/api/engine', payload: { autoApprove: true } });
+
+    const audit = (await factory.app.inject({ method: 'GET', url: '/api/audit' })).json<{ seq: number; actor: string; action: string }[]>();
+    expect(audit.map((a) => a.action)).toEqual(expect.arrayContaining(['approve', 'line_stop', 'line_resume', 'engine_settings']));
+    expect(audit.find((a) => a.action === 'approve')?.actor).toBe('Ignacio');
+    expect(audit.map((a) => a.seq)).toEqual(audit.map((_, i) => i + 1));
+
+    const ok = (await factory.app.inject({ method: 'GET', url: '/api/audit/verify' })).json();
+    expect(ok).toMatchObject({ ok: true, brokenAt: null });
+
+    (runtime.repo as MemoryRepository).tamperAudit(2, 'detalle reescrito');
+    const broken = (await factory.app.inject({ method: 'GET', url: '/api/audit/verify' })).json();
+    expect(broken).toMatchObject({ ok: false, brokenAt: 2 });
+  });
+});

@@ -1,6 +1,7 @@
 /** Cliente HTTP tipado. Los errores de la API se convierten en ApiError con el código del servidor. */
 import type {
   ApiErrorBody,
+  AuditEntry,
   ApprovalInput,
   CreateTaskInput,
   EngineState,
@@ -61,4 +62,9 @@ export const api = {
   retry: (id: string) => request<TaskView>('POST', `/api/tasks/${id}/retry`),
   updateEngine: (patch: EngineUpdate) => request<EngineState>('PATCH', '/api/engine', patch),
   updateNode: (id: string, patch: NodeConfigUpdate) => request<NodeConfig>('PATCH', `/api/nodes/${id}/config`, patch),
+  stopLine: (reason: string) => request<EngineState>('POST', '/api/line/stop', { reason }),
+  resumeLine: (note: string) => request<EngineState>('POST', '/api/line/resume', { note }),
+  audit: (limit = 50) => request<AuditEntry[]>('GET', `/api/audit?limit=${String(limit)}`),
+  verifyAudit: () =>
+    request<{ ok: boolean; entries: number; brokenAt: number | null; reason: string | null }>('GET', '/api/audit/verify'),
 };

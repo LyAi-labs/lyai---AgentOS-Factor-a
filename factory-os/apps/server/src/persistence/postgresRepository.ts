@@ -1,6 +1,7 @@
 import pg from 'pg';
 import type { PoolClient } from 'pg';
 import type {
+  AuditEntry,
   EdgeDef,
   LayerDef,
   ListTasksQuery,
@@ -25,7 +26,8 @@ SELECT t.id, t.title, t.lane, t.kind, t.priority, t.status, t.rework_count,
          SELECT json_agg(json_build_object(
                   'nodeId', s.node_id, 'deps', s.deps, 'status', s.status, 'attempts', s.attempts,
                   'queuedAt', ${ms('s.queued_at')}, 'startedAt', ${ms('s.started_at')},
-                  'finishedAt', ${ms('s.finished_at')}, 'error', s.error) ORDER BY s.ord)
+                  'finishedAt', ${ms('s.finished_at')}, 'error', s.error,
+                  'verdict', s.verdict, 'findings', s.findings) ORDER BY s.ord)
          FROM task_steps s WHERE s.task_id = t.id), '[]'::json) AS steps
 FROM tasks t`;
 
@@ -161,8 +163,12 @@ export class PostgresRepository implements Repository {
     );
   }
 
-  async persistBatch(tasks: readonly TaskView[], runs: readonly StageRunRecord[]): Promise<void> {
-    if (tasks.length === 0 && runs.length === 0) return;
+  async persistBatch(
+    tasks: readonly TaskView[],
+    runs: readonly StageRunRecord[],
+    audits: readonly AuditEntry[] = [],
+  ): Promise<void> {
+    if (tasks.length === 0 && runs.length === 0 && audits.length === 0) return;
     await this.tx(async (c) => {
       if (tasks.length > 0) {
         await c.query(
@@ -181,15 +187,17 @@ export class PostgresRepository implements Repository {
         const steps = tasks.flatMap((t) => t.steps.map((s, ord) => ({ ...s, taskId: t.id, ord })));
         await c.query(
           `INSERT INTO task_steps (task_id, node_id, ord, deps, status, attempts, queued_at, started_at,
-                                   finished_at, error)
+                                   finished_at, error, verdict, findings)
            SELECT x."taskId", x."nodeId", x.ord, ARRAY(SELECT jsonb_array_elements_text(x.deps)), x.status,
-                  x.attempts, ${ts('"queuedAt"')}, ${ts('"startedAt"')}, ${ts('"finishedAt"')}, x.error
+                  x.attempts, ${ts('"queuedAt"')}, ${ts('"startedAt"')}, ${ts('"finishedAt"')}, x.error,
+                  x.verdict, COALESCE(x.findings, '[]'::jsonb)
            FROM jsonb_to_recordset($1::jsonb) AS x("taskId" uuid, "nodeId" text, ord smallint, deps jsonb,
                 status text, attempts smallint, "queuedAt" float8, "startedAt" float8, "finishedAt" float8,
-                error text)
+                error text, verdict text, findings jsonb)
            ON CONFLICT (task_id, node_id) DO UPDATE SET status = EXCLUDED.status, attempts = EXCLUDED.attempts,
              queued_at = EXCLUDED.queued_at, started_at = EXCLUDED.started_at,
-             finished_at = EXCLUDED.finished_at, error = EXCLUDED.error`,
+             finished_at = EXCLUDED.finished_at, error = EXCLUDED.error,
+             verdict = EXCLUDED.verdict, findings = EXCLUDED.findings`,
           [JSON.stringify(steps)],
         );
       }
@@ -204,7 +212,37 @@ export class PostgresRepository implements Repository {
           [JSON.stringify(runs)],
         );
       }
+      if (audits.length > 0) {
+        await c.query(
+          `INSERT INTO audit_log (seq, at, actor, action, task_id, node_id, detail, prev_hash, hash)
+           SELECT x.seq, ${ts('at')}, x.actor, x.action, x."taskId", x."nodeId", x.detail, x."prevHash", x.hash
+           FROM jsonb_to_recordset($1::jsonb) AS x(seq bigint, at float8, actor text, action text, "taskId" uuid,
+                "nodeId" text, detail text, "prevHash" text, hash text)
+           ON CONFLICT (seq) DO NOTHING`,
+          [JSON.stringify(audits)],
+        );
+      }
     });
+  }
+
+  async loadAuditHead(): Promise<{ seq: number; hash: string } | null> {
+    const { rows } = await this.pool.query<{ seq: string; hash: string }>(
+      'SELECT seq, hash FROM audit_log ORDER BY seq DESC LIMIT 1',
+    );
+    const row = rows[0];
+    return row ? { seq: Number(row.seq), hash: row.hash } : null;
+  }
+
+  async listAudit(limit?: number): Promise<AuditEntry[]> {
+    const { rows } = await this.pool.query<Omit<AuditEntry, 'seq'> & { seq: string }>(
+      `SELECT * FROM (
+         SELECT seq, ${ms('at')} AS at, actor, action, task_id AS "taskId", node_id AS "nodeId", detail,
+                prev_hash AS "prevHash", hash
+         FROM audit_log ORDER BY seq DESC LIMIT $1
+       ) t ORDER BY seq`,
+      [limit ?? null],
+    );
+    return rows.map((r) => ({ ...r, seq: Number(r.seq) }));
   }
 
   async loadOpenTasks(): Promise<TaskView[]> {

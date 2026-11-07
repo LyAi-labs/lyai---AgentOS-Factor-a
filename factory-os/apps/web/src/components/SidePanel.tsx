@@ -4,6 +4,8 @@ import type { Lane, NodeConfig, Priority, StepStatus, TaskKind, TaskView } from 
 import { api } from '../lib/api';
 import { formatAgo, formatClock, formatDuration, formatNumber, formatPercent } from '../lib/format';
 import { CATEGORY_STYLE, HEALTH_STYLE } from '../lib/graph';
+import { computeImpact } from '../lib/impact';
+import { AuditPanel } from './AuditPanel';
 import type { FactoryState } from '../state/store';
 import { BarList, LineChart } from './charts';
 import { useAction } from './useAction';
@@ -184,11 +186,30 @@ function NodeInspector({ state, onSelectTask }: { state: FactoryState; onSelectT
         {def.role === 'resource' && <Metric label="Consultas" value={formatNumber(metrics?.accesses)} />}
       </dl>
       {config && (def.role === 'processor' || def.role === 'gateway') && <NodeConfigForm config={config} />}
+      <ImpactSection nodeId={id} tasks={state.tasks} />
       <section>
         <h3>Tareas en este nodo ({here.length})</h3>
         <TaskList tasks={here} nodeId={id} now={state.engine?.simTime ?? null} onSelect={onSelectTask} />
       </section>
     </div>
+  );
+}
+
+function ImpactSection({ nodeId, tasks }: { nodeId: string; tasks: readonly TaskView[] }) {
+  const impact = useMemo(() => computeImpact(nodeId, tasks), [nodeId, tasks]);
+  return (
+    <section className="impact" aria-label="Impacto aguas abajo">
+      <h3>Impacto aguas abajo</h3>
+      <p className="muted">
+        {impact.downstream.length} nodos dependen de este paso
+        {impact.layersAffected.length > 0 && ` (capas ${impact.layersAffected.map((l) => `0${String(l)}`).join(', ')})`}
+        {' · '}
+        {impact.pendingTasks.length} tareas en curso aún tienen que pasar por aquí.
+      </p>
+      {impact.downstream.length > 0 && (
+        <p className="impact__list">{impact.downstream.map((d) => d.label).join(' · ')}</p>
+      )}
+    </section>
   );
 }
 
@@ -405,7 +426,21 @@ function TaskDetail({ task, now, onBack }: { task: TaskView; now: number | null;
             <span className="step__time">
               {s.startedAt !== null && s.finishedAt !== null ? formatDuration(s.finishedAt - s.startedAt) : ''}
             </span>
-            {s.error && <span className="step__error">{s.error}</span>}
+            {s.verdict && (
+              <span className={`verdict verdict--${s.verdict}`}>
+                veredicto: {s.verdict}
+              </span>
+            )}
+            {s.findings.length > 0 && (
+              <ul className="findings">
+                {s.findings.map((f, i) => (
+                  <li key={i} className={f.bloquea ? 'is-blocking' : ''}>
+                    {f.bloquea ? 'bloquea' : 'no bloquea'} · {f.categoria} · {f.detalle}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {s.error && !s.verdict && <span className="step__error">{s.error}</span>}
             {s.status === 'awaiting_approval' && (
               <span className="step__actions">
                 <button type="button" className="btn btn--primary" disabled={action.busy} onClick={() => void action.run(() => api.approve(task.id, { nodeId: s.nodeId, decision: 'approve' }))}>
@@ -427,7 +462,18 @@ function TaskDetail({ task, now, onBack }: { task: TaskView; now: number | null;
 
 function Activity({ state, onSelectNode }: { state: FactoryState; onSelectNode: (id: string) => void }) {
   const events = [...state.activity].reverse();
-  if (events.length === 0) return <p className="muted">Sin actividad todavía.</p>;
+  return (
+    <div className="stack">
+      <AuditPanel />
+      <section>
+        <h3>Actividad reciente</h3>
+        {events.length === 0 ? <p className="muted">Sin actividad todavía.</p> : <ActivityList events={events} onSelectNode={onSelectNode} />}
+      </section>
+    </div>
+  );
+}
+
+function ActivityList({ events, onSelectNode }: { events: FactoryState['activity']; onSelectNode: (id: string) => void }) {
   return (
     <ul className="activity">
       {events.map((e) => (

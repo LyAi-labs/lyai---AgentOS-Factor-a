@@ -43,3 +43,17 @@ On connection `/ws` SHALL send a full `snapshot`, then coalesced `tasks`, `metri
 #### Scenario: pausar
 - **WHEN** `PATCH /api/engine { running: false }`
 - **THEN** simulated time stops advancing
+
+### Requirement: API-007 Control de la línea por API
+`POST /api/line/stop { reason }` SHALL stop the line and `POST /api/line/resume { note }` SHALL resume it (409 if not stopped); the engine state broadcast SHALL include `lineStopped`, `lineStopReason` and `lineStoppedAt`.
+
+#### Scenario: parada manual (andon)
+- **WHEN** the operator posts a stop with a reason
+- **THEN** `GET /api/engine` reports `lineStopped: true` with that reason
+
+### Requirement: API-008 Auditoría encadenada
+Human decisions (approve, reject, retry), line stops/resumes, node configuration changes and `autoApprove` changes SHALL be appended to an audit log where each entry's hash is SHA-256 of the previous hash plus its canonical content, recording the actor (`Ignacio`, `autoApprove` or `motor`). `GET /api/audit` SHALL list it and `GET /api/audit/verify` SHALL recompute the chain and report the first broken sequence if any entry was altered.
+
+#### Scenario: manipulación detectada
+- **WHEN** a stored entry's detail is altered
+- **THEN** verify returns `ok: false` with `brokenAt` equal to that entry's sequence

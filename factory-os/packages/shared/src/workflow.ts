@@ -10,6 +10,9 @@ export const MAX_REWORK = 2;
 export const MAX_ATTEMPTS = 3;
 
 export const REWORK_GATE = 'approver';
+
+/** Nodos que emiten veredicto (aprobado / rechazado / blocked) y votan en el quórum de Approver. */
+export const REVIEWER_NODES: ReadonlySet<string> = new Set(['verificador', 'seguridad', 'codigo', 'ui', 'ux']);
 export const REWORK_TARGET = 'builder';
 
 const s = (nodeId: string, ...deps: string[]): WorkflowStepDef => ({ nodeId, deps });

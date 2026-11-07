@@ -3,7 +3,7 @@ import { initialState, MAX_HISTORY, MAX_TASKS, reducer } from '../src/state/stor
 import type { FactoryState } from '../src/state/store';
 import { metrics, task } from './fixtures';
 
-const engine = { running: true, speed: 10, arrivalRatePerMin: 4, autoApprove: false, simTime: 1000 };
+const engine = { running: true, speed: 10, arrivalRatePerMin: 4, autoApprove: false, simTime: 1000, lineStopped: false, lineStopReason: null, lineStoppedAt: null };
 
 function withSnapshot(): FactoryState {
   return reducer(initialState, {

@@ -69,8 +69,13 @@ factory-os/
 | exprés | … Analyze → Carril exprés → Builder → {Verificador, Seguridad} → **Approver 2/2** → Router → Tu OK → main local → Producción |
 | urgencia | Entradas → Carril urgencia (humano) → main local → Producción → Seguridad (rev. <24 h) |
 
-Un rechazo en Approver reinicia Builder y sus descendientes (máx. 2 retrabajos y, al tercero, `error`). Un paso que falla
-se reintenta hasta 3 veces. Tu OK, Carril urgencia y Producción esperan aprobación explícita (salvo `autoApprove`).
+**Gobierno alineado con la constitución de lyai-factory:**
+
+- **Veredictos (contrato `docs/contratos/veredicto.md`).** Verificador, Seguridad, Código, UI y UX devuelven `aprobado`, `rechazado` (con al menos un hallazgo que bloquea) o `blocked` (no se pudo revisar). El estilo nunca bloquea (O2). A un revisor no se le reintenta: si no responde, cuenta como `blocked` (O9).
+- **Quórum.** Approver pasa solo con 4 de 4 `aprobado` (2 de 2 en el carril exprés). Si no, la tarea vuelve a Builder, con un máximo de 2 retrabajos; a la tercera, `error` y aviso a Ignacio (O2).
+- **Parar la línea (O1).** Un `blocked`, una revisión a posteriori negativa o el botón *Parar línea* detienen todo arranque de pasos y toda aprobación automática, hasta que una persona la reanuda con una nota.
+- **Auditoría encadenada.** Aprobaciones, rechazos, reintentos, paradas y reanudaciones, cambios de configuración y de `autoApprove` se guardan en `audit_log` (solo inserción; un trigger impide UPDATE y DELETE). Cada entrada lleva `hash = SHA-256(prevHash + contenido)`. No se firma en nombre de nadie: la firma real es la de Ignacio con sus claves SSH en git.
+- **Reintentos.** Un procesador que falla (Builder, Spec writer…) se reintenta hasta 3 veces. Tu OK, Carril urgencia y Producción esperan aprobación explícita (salvo `autoApprove`).
 
 **PostgreSQL** (`apps/server/src/persistence/migrations.ts`): `layers`, `nodes` (con la config operativa:
 capacidad, duración, tasa de fallo), `edges` (FK + `CHECK source <> target` + `UNIQUE(source,target,kind)`), `tasks`,
@@ -96,6 +101,8 @@ Todas las entradas se validan con zod. Los errores tienen siempre la forma `{ "e
 | `GET /api/metrics` | WIP, throughput, éxito, ciclo p50/p95, métricas por nodo y capa, cuellos de botella. |
 | `GET/PATCH /api/engine` | `running`, `speed`, `arrivalRatePerMin`, `autoApprove`. |
 | `GET /api/activity` | Últimos 200 eventos. |
+| `POST /api/line/stop` · `POST /api/line/resume` | `{ reason }` / `{ note }`: parar y reanudar la línea (409 si no está parada). |
+| `GET /api/audit?limit` · `GET /api/audit/verify` | Registro de auditoría y verificación de la cadena (`ok`, `brokenAt`, `reason`). |
 
 **WebSocket `/ws`.** Mensajes del servidor: `snapshot` (al conectar y tras `resync`), `tasks`, `metrics`, `engine`,
 `activity`, `node_config`, `pong`. Mensajes del cliente: `{type:"ping"}` y `{type:"resync"}`; lo inválido se ignora.

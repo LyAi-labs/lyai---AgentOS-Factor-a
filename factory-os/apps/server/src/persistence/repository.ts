@@ -1,4 +1,5 @@
 import type {
+  AuditEntry,
   EdgeDef,
   LayerDef,
   ListTasksQuery,
@@ -19,7 +20,11 @@ export interface Repository {
   loadNodeConfigs(): Promise<NodeConfig[]>;
   saveNodeConfig(config: NodeConfig): Promise<void>;
   /** Upsert atómico de instantáneas (tarea + pasos) y alta de ejecuciones, en una sola transacción. */
-  persistBatch(tasks: readonly TaskView[], runs: readonly StageRunRecord[]): Promise<void>;
+  persistBatch(tasks: readonly TaskView[], runs: readonly StageRunRecord[], audits?: readonly AuditEntry[]): Promise<void>;
+  /** Última entrada de la cadena de auditoría (para continuarla tras reiniciar). */
+  loadAuditHead(): Promise<{ seq: number; hash: string } | null>;
+  /** Entradas de auditoría en orden de secuencia; `limit` toma las más recientes. */
+  listAudit(limit?: number): Promise<AuditEntry[]>;
   loadOpenTasks(): Promise<TaskView[]>;
   listTasks(query: ListTasksQuery): Promise<TaskView[]>;
   getTask(id: string): Promise<TaskView | null>;

@@ -4,12 +4,13 @@
  * - Serialización: nunca hay dos vaciados concurrentes (orden de escritura garantizado).
  * - Resiliencia: si un lote falla, se reencola y se reintenta en el siguiente ciclo.
  */
-import type { StageRunRecord, TaskView } from '@factory-os/shared';
+import type { AuditEntry, StageRunRecord, TaskView } from '@factory-os/shared';
 import type { Repository } from './repository.js';
 
 export interface WriteBehindStatus {
   pendingTasks: number;
   pendingRuns: number;
+  pendingAudits: number;
   flushes: number;
   failedFlushes: number;
   /** Registros descartados por violar restricciones de integridad (nunca bloquean al resto). */
@@ -26,6 +27,7 @@ export function isIntegrityViolation(error: unknown): boolean {
 export class WriteBehind {
   private tasks = new Map<string, TaskView>();
   private runs: StageRunRecord[] = [];
+  private audits: AuditEntry[] = [];
   private inFlight: Promise<void> | null = null;
   private timer: NodeJS.Timeout | null = null;
   private readonly status = { flushes: 0, failedFlushes: 0, dropped: 0, lastError: null as string | null };
@@ -58,23 +60,29 @@ export class WriteBehind {
     this.runs.push(run);
   }
 
+  enqueueAudit(entry: AuditEntry): void {
+    this.audits.push(entry);
+  }
+
   /** Vacía todo lo pendiente; si ya hay un vaciado en curso, espera a él y repite. */
   async flush(): Promise<void> {
     while (this.inFlight) await this.inFlight;
-    if (this.tasks.size === 0 && this.runs.length === 0) return;
+    if (this.tasks.size === 0 && this.runs.length === 0 && this.audits.length === 0) return;
     const tasks = this.tasks;
     const runs = this.runs;
+    const audits = this.audits;
     this.tasks = new Map();
     this.runs = [];
+    this.audits = [];
     this.inFlight = this.repo
-      .persistBatch([...tasks.values()], runs)
+      .persistBatch([...tasks.values()], runs, audits)
       .then(() => {
         this.status.flushes += 1;
         this.status.lastError = null;
       })
       .catch(async (error: unknown) => {
         if (isIntegrityViolation(error)) {
-          await this.isolate([...tasks.values()], runs);
+          await this.isolate([...tasks.values()], runs, audits);
           return;
         }
         this.status.failedFlushes += 1;
@@ -82,6 +90,7 @@ export class WriteBehind {
         // Reencolar sin pisar estados más recientes llegados durante el intento.
         for (const [id, task] of tasks) if (!this.tasks.has(id)) this.tasks.set(id, task);
         this.runs = [...runs, ...this.runs];
+        this.audits = [...audits, ...this.audits];
         this.onError(error);
       })
       .finally(() => {
@@ -91,7 +100,11 @@ export class WriteBehind {
   }
 
   /** Persiste uno a uno (tareas antes que ejecuciones, por la FK) y descarta solo lo inválido. */
-  private async isolate(tasks: readonly TaskView[], runs: readonly StageRunRecord[]): Promise<void> {
+  private async isolate(
+    tasks: readonly TaskView[],
+    runs: readonly StageRunRecord[],
+    audits: readonly AuditEntry[],
+  ): Promise<void> {
     const attempt = async (t: readonly TaskView[], r: readonly StageRunRecord[], what: string) => {
       try {
         await this.repo.persistBatch(t, r);
@@ -104,6 +117,16 @@ export class WriteBehind {
     try {
       for (const task of tasks) await attempt([task], [], `tarea ${task.id}`);
       for (const run of runs) await attempt([], [run], `ejecución ${run.id}`);
+      // La auditoría se persiste en orden; una entrada descartada rompería la cadena y verify() lo mostraría.
+      for (const entry of audits) {
+        try {
+          await this.repo.persistBatch([], [], [entry]);
+        } catch (error) {
+          if (!isIntegrityViolation(error)) throw error;
+          this.status.dropped += 1;
+          this.onError(new Error(`Auditoría ${entry.seq} descartada: ${error instanceof Error ? error.message : String(error)}`));
+        }
+      }
       this.status.flushes += 1;
       this.status.lastError = null;
     } catch (error) {
@@ -114,6 +137,6 @@ export class WriteBehind {
   }
 
   getStatus(): WriteBehindStatus {
-    return { pendingTasks: this.tasks.size, pendingRuns: this.runs.length, ...this.status };
+    return { pendingTasks: this.tasks.size, pendingRuns: this.runs.length, pendingAudits: this.audits.length, ...this.status };
   }
 }

@@ -24,7 +24,7 @@ Queued steps SHALL be dispatched by priority (P0 first), then lane (urgent, expr
 - **THEN** the P0 task starts first
 
 ### Requirement: ENG-004 Retrabajo acotado
-A rejection at Approver SHALL reset Builder and all its descendants and re-queue Builder; after more than 2 rejections the task SHALL go to `error`.
+A rejection at Approver — because a reviewer verdict is not `aprobado` (quorum not reached) or because of Approver's own judgment — SHALL reset Builder and all its descendants (clearing their verdicts) and re-queue Builder; after more than 2 rejections the task SHALL go to `error` (constitución O2: at the 3rd round, Ignacio is warned).
 
 #### Scenario: tres rechazos
 - **WHEN** Approver rejects a task three times
@@ -78,3 +78,17 @@ Metrics SHALL report WIP, completed, errored, throughput per simulated minute, s
 #### Scenario: tras completar
 - **WHEN** tasks complete
 - **THEN** cycle time percentiles are non-null and p50 ≤ p95
+
+### Requirement: ENG-012 Contrato de veredicto de los revisores
+Reviewer nodes (Verificador, Seguridad, Código, UI, UX) SHALL finish with a verdict `aprobado | rechazado | blocked` (lyai-factory `docs/contratos/veredicto.md`). A reviewer SHALL never be retried: a reviewer that does not respond or returns no valid verdict counts as `blocked` (constitución O9). Approver SHALL pass only with 4 of 4 `aprobado` (2 of 2 in the express lane); non-blocking style findings SHALL NOT block (O2).
+
+#### Scenario: Seguridad rechaza
+- **WHEN** Seguridad returns `rechazado` with a blocking finding on the first round
+- **THEN** Seguridad ran once in that round, Approver rejects with "Quórum no alcanzado", and Builder runs again
+
+### Requirement: ENG-013 Parar la línea
+A `blocked` verdict, a negative post-hoc review (urgent lane), or a manual stop SHALL stop the line (constitución O1): no step starts and no automatic approval happens until a person resumes it with a note; running steps finish. Resuming a line that is not stopped SHALL be a conflict.
+
+#### Scenario: revisor blocked
+- **WHEN** Código returns `blocked`
+- **THEN** the line is stopped with a reason naming Código, queued work does not start after ticking, and it resumes after `resumeLine`

@@ -23,3 +23,10 @@ Reachability in PostgreSQL SHALL use a recursive CTE over `edges` and match the 
 #### Scenario: todos los nodos
 - **WHEN** reachability is computed for every node in SQL and in memory
 - **THEN** both results are equal
+
+### Requirement: PER-004 Auditoría de solo inserción en PostgreSQL
+`audit_log` SHALL reject UPDATE and DELETE (trigger), and a new runtime SHALL continue the chain from the persisted head so the whole log still verifies after a restart.
+
+#### Scenario: reinicio
+- **WHEN** entries are written, the runtime is recreated and more entries are written
+- **THEN** verifying all entries returns `ok: true` and an UPDATE on `audit_log` fails

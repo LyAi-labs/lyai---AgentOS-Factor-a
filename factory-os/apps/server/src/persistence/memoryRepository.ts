@@ -1,5 +1,6 @@
 import { reachableFrom } from '@factory-os/shared';
 import type {
+  AuditEntry,
   EdgeDef,
   LayerDef,
   ListTasksQuery,
@@ -18,6 +19,7 @@ export class MemoryRepository implements Repository {
   private readonly configs = new Map<string, NodeConfig>();
   private readonly tasks = new Map<string, TaskView>();
   private readonly runs: StageRunRecord[] = [];
+  private readonly audits: AuditEntry[] = [];
 
   async migrate(): Promise<void> {}
 
@@ -36,9 +38,30 @@ export class MemoryRepository implements Repository {
     this.configs.set(config.nodeId, clone(config));
   }
 
-  async persistBatch(tasks: readonly TaskView[], runs: readonly StageRunRecord[]): Promise<void> {
+  async persistBatch(
+    tasks: readonly TaskView[],
+    runs: readonly StageRunRecord[],
+    audits: readonly AuditEntry[] = [],
+  ): Promise<void> {
     for (const task of tasks) this.tasks.set(task.id, clone(task));
     this.runs.push(...runs.map(clone));
+    for (const a of audits) if (!this.audits.some((x) => x.seq === a.seq)) this.audits.push(clone(a));
+  }
+
+  async loadAuditHead(): Promise<{ seq: number; hash: string } | null> {
+    const last = [...this.audits].sort((a, b) => b.seq - a.seq)[0];
+    return last ? { seq: last.seq, hash: last.hash } : null;
+  }
+
+  async listAudit(limit?: number): Promise<AuditEntry[]> {
+    const sorted = [...this.audits].sort((a, b) => a.seq - b.seq);
+    return (limit ? sorted.slice(-limit) : sorted).map(clone);
+  }
+
+  /** Solo para tests: simula manipulación directa del almacenamiento. */
+  tamperAudit(seq: number, detail: string): void {
+    const entry = this.audits.find((a) => a.seq === seq);
+    if (entry) entry.detail = detail;
   }
 
   async loadOpenTasks(): Promise<TaskView[]> {
