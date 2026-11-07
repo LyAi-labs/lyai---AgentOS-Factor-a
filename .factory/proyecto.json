@@ -1,0 +1,33 @@
+{
+  "slug": "agentos-factor-a",
+  "nombre": "AgentOS Factor A · factory-os",
+  "repo": "LyAi-labs/lyai---AgentOS-Factor-a",
+  "repo_dir": "/opt/lyai/agentos-factor-a",
+  "rama_principal": "claude/compassionate-wozniak-2h4ztu",
+  "specs_dir": "/opt/lyai/wiki/pages/agentos-factor-a/factory/specs",
+  "state_dir": "/opt/lyai/state/factory/agentos-factor-a",
+  "vivo_dir": null,
+  "profundidad": "ligera",
+  "topes_usd": {
+    "dia_proyecto": 100.0,
+    "dia_total": 100.0,
+    "paso_builder": 3.0,
+    "paso_revisor": 0.5
+  },
+  "fuentes_entrada": {
+    "dependabot": false,
+    "loki_containers": []
+  },
+  "pruebas": {
+    "comandos": [
+      "cd factory-os && npm run verify"
+    ]
+  },
+  "despliegue": {
+    "modo": "a mano"
+  },
+  "riesgo": {
+    "sensible": [],
+    "siempre_4": []
+  }
+}

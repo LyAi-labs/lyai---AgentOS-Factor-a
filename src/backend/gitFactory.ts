@@ -587,8 +587,8 @@ export class GitFactoryBackend {
       `    fi`,
       ``,
       `    # 2. Verificar firma criptográfica GPG válida en el commit`,
-      `    GPG_STATUS=$(git -c gpg.program=${JSON.stringify(this.gpgWrapperPath)} log -1 --format=%G? "$commit" || true)`,
-      `    if ! git -c gpg.program=${JSON.stringify(this.gpgWrapperPath)} verify-commit "$commit" >/dev/null 2>&1 || { [ "$GPG_STATUS" != "G" ] && [ "$GPG_STATUS" != "U" ]; }; then`,
+      `    GPG_STATUS=$(git -c gpg.format=openpgp -c gpg.program=${JSON.stringify(this.gpgWrapperPath)} log -1 --format=%G? "$commit" || true)`,
+      `    if ! git -c gpg.format=openpgp -c gpg.program=${JSON.stringify(this.gpgWrapperPath)} verify-commit "$commit" >/dev/null 2>&1 || { [ "$GPG_STATUS" != "G" ] && [ "$GPG_STATUS" != "U" ]; }; then`,
       `      echo "[SERVER-HOOK pre-receive RECHAZADO] El commit \${SHORT_SHA} (\${refname}) NO contiene una firma GPG válida (estado GPG: \${GPG_STATUS:-N}). Mensaje: \\"\${SUBJECT}\\"" >&2`,
       `      echo "$(date -Iseconds) | pre-receive | REJECTED_INVALID_GPG | \${SHORT_SHA} | \${refname} | GPG=\${GPG_STATUS:-N}" >> "$AUDIT_LOG"`,
       `      exit 1`,
@@ -638,8 +638,8 @@ export class GitFactoryBackend {
       `  fi`,
       ``,
       `  # 2. Verificar firma criptográfica GPG válida`,
-      `  GPG_STATUS=$(git -c gpg.program=${JSON.stringify(this.gpgWrapperPath)} log -1 --format=%G? "$commit" || true)`,
-      `  if ! git -c gpg.program=${JSON.stringify(this.gpgWrapperPath)} verify-commit "$commit" >/dev/null 2>&1 || { [ "$GPG_STATUS" != "G" ] && [ "$GPG_STATUS" != "U" ]; }; then`,
+      `  GPG_STATUS=$(git -c gpg.format=openpgp -c gpg.program=${JSON.stringify(this.gpgWrapperPath)} log -1 --format=%G? "$commit" || true)`,
+      `  if ! git -c gpg.format=openpgp -c gpg.program=${JSON.stringify(this.gpgWrapperPath)} verify-commit "$commit" >/dev/null 2>&1 || { [ "$GPG_STATUS" != "G" ] && [ "$GPG_STATUS" != "U" ]; }; then`,
       `    echo "[SERVER-HOOK update RECHAZADO] Ref \${refname}: El commit \${SHORT_SHA} NO tiene una firma GPG válida (estado GPG: \${GPG_STATUS:-N})." >&2`,
       `    echo "$(date -Iseconds) | update | REJECTED_INVALID_GPG | \${SHORT_SHA} | \${refname} | GPG=\${GPG_STATUS:-N}" >> "$AUDIT_LOG"`,
       `    exit 1`,
@@ -693,7 +693,7 @@ export class GitFactoryBackend {
         this.ensureGpgKeyringInitialized();
         const gpgCheck = execFileSync(
           'git',
-          ['-c', `gpg.program=${this.gpgWrapperPath}`, 'log', '-1', '--format=%G?|%s', 'HEAD'],
+          ['-c', 'gpg.format=openpgp', '-c', `gpg.program=${this.gpgWrapperPath}`, 'log', '-1', '--format=%G?|%s', 'HEAD'],
           {
             cwd: this.repoPath,
             encoding: 'utf-8',
@@ -741,6 +741,9 @@ export class GitFactoryBackend {
     this.runGit(['config', 'user.email', 'factory@agentos.local']);
     this.runGit(['config', 'user.signingkey', fpr]);
     this.runGit(['config', 'commit.gpgsign', 'true']);
+    // Fijar OpenPGP en local: si el git global usa firma SSH (gpg.format=ssh), los commits saldrían
+    // firmados con SSH y verify-commit/%G? fallarían. El repo de la factoría firma siempre con GPG.
+    this.runGit(['config', 'gpg.format', 'openpgp']);
     this.runGit(['config', 'gpg.program', this.gpgWrapperPath]);
     this.runGit(['config', 'receive.denyCurrentBranch', 'updateInstead']);
 

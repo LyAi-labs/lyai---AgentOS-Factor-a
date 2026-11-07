@@ -1,0 +1,54 @@
+name: factory-os
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: factory
+      POSTGRES_USER: factory
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-factory-dev-only}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U factory -d factory"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+      secrets: [ca]
+    environment:
+      DATABASE_URL: postgres://factory:${POSTGRES_PASSWORD:-factory-dev-only}@db:5432/factory
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SIM_SPEED: ${SIM_SPEED:-10}
+      SIM_ARRIVAL_RATE: ${SIM_ARRIVAL_RATE:-2}
+      SIM_AUTO_APPROVE: ${SIM_AUTO_APPROVE:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      secrets: [ca]
+    ports:
+      - "${WEB_PORT:-8088}:80"
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db-data:
+
+# CA extra solo para el build (vacía por defecto). Tras un proxy con inspección TLS:
+#   BUILD_CA_FILE=/ruta/ca.crt docker compose up --build
+secrets:
+  ca:
+    file: ${BUILD_CA_FILE:-./docker/empty-ca.crt}
