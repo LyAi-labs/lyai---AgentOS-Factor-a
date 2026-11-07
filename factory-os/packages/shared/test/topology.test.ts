@@ -22,6 +22,22 @@ describe('graph-topology', () => {
     expect(new Set(NODES.map((n) => n.id)).size).toBe(NODES.length);
     const layerIds = new Set(LAYERS.map((l) => l.id));
     for (const node of NODES) expect(layerIds.has(node.layer)).toBe(true);
+
+    // Banda 03 canónica: quórum de 4 revisores en paralelo
+    const layer3Nodes = NODES.filter((n) => n.layer === 3).map((n) => n.id).sort();
+    expect(layer3Nodes).toEqual(['codigo', 'seguridad', 'ui', 'ux']);
+
+    // Nombres canónicos de las 5 bandas
+    const layer3 = LAYERS.find((l) => l.id === 3);
+    expect(layer3?.name.toLowerCase()).toContain('revisión en paralelo');
+
+    // Sin solapes espaciales y acotado a 6 columnas (cols 0..5)
+    for (const n of NODES) {
+      expect(n.col).toBeGreaterThanOrEqual(0);
+      expect(n.col).toBeLessThan(6);
+    }
+    const coords = new Set(NODES.map((n) => `${n.layer}:${n.col}`));
+    expect(coords.size).toBe(NODES.length);
   });
 
   it('[TOP-002] cada nodo tiene categoría de leyenda y rol válidos', () => {
