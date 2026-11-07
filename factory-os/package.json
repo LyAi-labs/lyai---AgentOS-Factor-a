@@ -1,0 +1,35 @@
+{
+  "name": "factory-os",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Sistema operativo de la factor\u00eda ag\u00e9ntica LyAi: motor DAG de tareas, API REST + WebSocket y lienzo de nodos en tiempo real.",
+  "type": "module",
+  "workspaces": [
+    "packages/shared",
+    "apps/server",
+    "apps/web"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "npm run build -w @factory-os/shared && npm run build -w @factory-os/server && npm run build -w @factory-os/web",
+    "typecheck": "npm run typecheck --workspaces",
+    "lint": "eslint .",
+    "test": "npm run test --workspaces",
+    "verify": "npm run typecheck && npm run lint && npm run spec:check && npm run test && npm run build",
+    "dev:server": "npm run dev -w @factory-os/server",
+    "dev:web": "npm run dev -w @factory-os/web",
+    "smoke": "node scripts/smoke.mjs",
+    "spec:check": "node scripts/check-spec-coverage.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.13.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.14.0",
+    "playwright": "1.63.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1"
+  }
+}
