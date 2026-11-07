@@ -3,7 +3,10 @@
 #   docker-compose -f docker-compose.yml -f docker-compose.traefik.yml up -d --build
 services:
   web:
-    ports: !reset []
+    # Solo loopback: la extensión Factoría de VS Code lo embebe por portMapping (túnel SSH de VS Code).
+    # Por factory.lyai.pro (IP de Tailscale) el webview lo bloquea la protección local-network-access de Chromium.
+    ports: !override
+      - "127.0.0.1:8094:80"
     networks:
       default: {}
       traefik:

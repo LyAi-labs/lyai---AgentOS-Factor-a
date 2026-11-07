@@ -3,7 +3,7 @@
   "nombre": "AgentOS Factor A · factory-os",
   "repo": "LyAi-labs/lyai---AgentOS-Factor-a",
   "repo_dir": "/opt/lyai/agentos-factor-a",
-  "rama_principal": "main",
+  "rama_principal": "claude/compassionate-wozniak-2h4ztu",
   "specs_dir": "/opt/lyai/wiki/pages/agentos-factor-a/factory/specs",
   "state_dir": "/opt/lyai/state/factory/agentos-factor-a",
   "vivo_dir": null,
