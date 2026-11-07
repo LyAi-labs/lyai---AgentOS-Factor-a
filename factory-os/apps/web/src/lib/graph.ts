@@ -6,13 +6,13 @@ import type { Edge, Node } from '@xyflow/react';
 import { buildWorkflow, EDGES, LAYERS, NODES, requireNode } from '@factory-os/shared';
 import type { EdgeKind, Lane, NodeCategory, NodeConfig, NodeDef, NodeHealth, NodeMetrics, TaskKind } from '@factory-os/shared';
 
-export const COL_W = 212;
+export const COL_W = 170;
 export const ROW_H = 156;
-export const NODE_W = 178;
+export const NODE_W = 150;
 export const NODE_H = 92;
-const COLS = 9;
-const PAD_X = 44;
-const PAD_Y = 40;
+export const COLS = 6;
+export const PAD_X = 42;
+export const PAD_Y = 40;
 
 /** Colores de la leyenda del diagrama de referencia + distintivo textual (el color nunca va solo). */
 export const CATEGORY_STYLE: Readonly<Record<NodeCategory, { label: string; badge: string; color: string }>> = {
@@ -132,17 +132,12 @@ export function buildFlowNodes(
   return [...bands, ...nodes];
 }
 
-/** Elige asas según posición relativa: derecha→izquierda, o arriba/abajo en la misma columna. */
+/** Elige asas según posición relativa: derecha→izquierda, arriba/abajo, o retroceso. */
 export function pickHandles(source: NodeDef, target: NodeDef): { sourceHandle: string; targetHandle: string } {
+  if (target.layer < source.layer) return { sourceHandle: 's-t', targetHandle: 't-b' };
   if (target.col > source.col) return { sourceHandle: 's-r', targetHandle: 't-l' };
-  if (target.col === source.col) {
-    return target.layer > source.layer
-      ? { sourceHandle: 's-b', targetHandle: 't-t' }
-      : { sourceHandle: 's-t', targetHandle: 't-b' };
-  }
-  return target.layer >= source.layer
-    ? { sourceHandle: 's-b', targetHandle: 't-b' }
-    : { sourceHandle: 's-t', targetHandle: 't-t' };
+  if (target.layer > source.layer) return { sourceHandle: 's-b', targetHandle: 't-t' };
+  return { sourceHandle: 's-b', targetHandle: 't-b' };
 }
 
 export function buildFlowEdges(metrics: readonly NodeMetrics[], view: GuidedView | null = null): Edge[] {

@@ -14,12 +14,15 @@ describe('dashboard canvas', () => {
     const builder = factory.find((n) => n.id === 'builder');
     expect(builder?.data.metrics?.health).toBe('running');
     expect(builder?.data.selected).toBe(true);
-    expect(builder?.position).toEqual(nodePosition({ col: 4, layer: 3 }));
+    expect(builder?.position).toEqual(nodePosition({ col: 3, layer: 2 }));
     // Regresión: sin width/height explícitos React Flow puede ocultar nodos al reconstruir el array.
     for (const n of flow) {
       expect(n.width).toBeGreaterThan(0);
       expect(n.height).toBeGreaterThan(0);
     }
+    // Banda compacta en torno a ~1060 px (viewBox oficial 1062 px)
+    const band01 = flow.find((n) => n.id === 'band-1');
+    expect(band01?.width).toBe(1062);
     for (const style of Object.values(CATEGORY_STYLE)) expect(style.badge.length).toBeGreaterThan(0);
 
     // sin solapes: posiciones únicas
@@ -34,8 +37,12 @@ describe('dashboard canvas', () => {
 
     const builderDef = NODES.find((n) => n.id === 'builder');
     const verificador = NODES.find((n) => n.id === 'verificador');
-    if (!builderDef || !verificador) throw new Error('topología incompleta');
-    expect(pickHandles(builderDef, verificador)).toEqual({ sourceHandle: 's-b', targetHandle: 't-t' });
+    const seguridad = NODES.find((n) => n.id === 'seguridad');
+    const approver = NODES.find((n) => n.id === 'approver');
+    if (!builderDef || !verificador || !seguridad || !approver) throw new Error('topología incompleta');
+    expect(pickHandles(builderDef, verificador)).toEqual({ sourceHandle: 's-r', targetHandle: 't-l' });
+    expect(pickHandles(builderDef, seguridad)).toEqual({ sourceHandle: 's-b', targetHandle: 't-t' });
+    expect(pickHandles(approver, builderDef)).toEqual({ sourceHandle: 's-t', targetHandle: 't-b' });
   });
 });
 
