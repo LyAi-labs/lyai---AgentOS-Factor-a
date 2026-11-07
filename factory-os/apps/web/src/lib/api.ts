@@ -12,6 +12,7 @@ import type {
   StageRunRecord,
   TaskView,
 } from '@factory-os/shared';
+import { getVsCodeApi } from './transport';
 
 export class ApiError extends Error {
   override name = 'ApiError';
@@ -24,7 +25,68 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
+export type RequestTransport = <T>(method: string, url: string, body?: unknown) => Promise<T>;
+
+let customTransport: RequestTransport | null = null;
+let requestIdSeq = 0;
+
+export function setRequestTransport(transport: RequestTransport): void {
+  customTransport = transport;
+}
+
+export function resetRequestTransport(): void {
+  customTransport = null;
+}
+
+async function vsCodeBridgeRequest<T>(method: string, url: string, body?: unknown): Promise<T> {
+  const vscode = getVsCodeApi();
+  if (!vscode) {
+    throw new ApiError(0, 'NO_VSCODE', 'acquireVsCodeApi no disponible');
+  }
+
+  const id = `req-${String(++requestIdSeq)}-${String(Date.now())}`;
+
+  return new Promise<T>((resolve, reject) => {
+    const handler = (event: MessageEvent<unknown>) => {
+      const data = event.data;
+      if (!data || typeof data !== 'object' || !('type' in data) || !('id' in data)) {
+        return;
+      }
+      const response = data as
+        | { type: 'api:result'; id: string; status: number; body: unknown }
+        | { type: 'api:error'; id: string; message: string };
+
+      if (response.id !== id) {
+        return;
+      }
+
+      window.removeEventListener('message', handler);
+
+      if (response.type === 'api:result') {
+        if (response.status >= 200 && response.status < 300) {
+          resolve(response.body as T);
+        } else {
+          const err = (response.body as ApiErrorBody | null)?.error;
+          reject(new ApiError(response.status, err?.code ?? 'HTTP', err?.message ?? `HTTP ${response.status}`));
+        }
+      } else {
+        reject(new ApiError(0, 'NETWORK', response.message));
+      }
+    };
+
+    window.addEventListener('message', handler);
+
+    vscode.postMessage({
+      type: 'api',
+      id,
+      method,
+      path: url,
+      body,
+    });
+  });
+}
+
+async function defaultFetchRequest<T>(method: string, url: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { accept: 'application/json' };
   const init: RequestInit = { method, headers };
   if (body !== undefined) {
@@ -44,6 +106,16 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
     throw new ApiError(res.status, err?.code ?? 'HTTP', err?.message ?? `HTTP ${res.status}`);
   }
   return data as T;
+}
+
+async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
+  if (customTransport) {
+    return customTransport<T>(method, url, body);
+  }
+  if (getVsCodeApi()) {
+    return vsCodeBridgeRequest<T>(method, url, body);
+  }
+  return defaultFetchRequest<T>(method, url, body);
 }
 
 function safeJson(text: string): unknown {
