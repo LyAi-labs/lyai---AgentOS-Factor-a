@@ -103,6 +103,10 @@ export function buildFlowNodes(
     type: 'band',
     position: { x: 0, y: (layer.id - 1) * ROW_H },
     data: { code: layer.code, name: layer.name },
+    // Dimensiones explícitas: React Flow las da por medidas y nunca oculta el nodo (visibility: hidden)
+    // al reconstruir el array en cada actualización de telemetría.
+    width: PAD_X + COLS * COL_W,
+    height: ROW_H - 12,
     style: { width: PAD_X + COLS * COL_W, height: ROW_H - 12 },
     draggable: false,
     selectable: false,
@@ -120,6 +124,8 @@ export function buildFlowNodes(
       selected: def.id === selectedId,
       dimmed: view !== null && !view.nodes.has(def.id),
     },
+    width: NODE_W,
+    height: NODE_H,
     style: { width: NODE_W, height: NODE_H },
     draggable: false,
   }));

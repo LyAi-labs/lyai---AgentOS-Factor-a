@@ -19,6 +19,18 @@ const check = (name, ok, detail = '') => {
 
 await mkdir(OUT, { recursive: true });
 
+/** La simulación puede parar la línea (O1) por un `blocked` aleatorio; el smoke la reanuda y lo deja auditado. */
+async function ensureLineRunning() {
+  const engine = await fetch(`${BASE_URL}/api/engine`).then((r) => r.json());
+  if (!engine.lineStopped) return false;
+  await fetch(`${BASE_URL}/api/line/resume`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ note: 'smoke: reanudación automática de prueba' }),
+  });
+  return true;
+}
+
 const health = await fetch(`${BASE_URL}/api/health`).then((r) => r.json()).catch(/** @param {unknown} e */ (e) => ({ error: String(e) }));
 check('GET /api/health', health.status === 'ok', JSON.stringify({ status: health.status, storage: health.storage, database: health.database }));
 
@@ -49,7 +61,12 @@ try {
   check('Alta de tarea desde la UI', true, title);
 
   await page.getByText(title).click();
-  await page.getByRole('button', { name: 'Aprobar' }).first().waitFor({ timeout: 60_000 });
+  for (let i = 0; i < 120; i++) {
+    if (await page.getByRole('button', { name: 'Aprobar' }).first().isVisible()) break;
+    await ensureLineRunning();
+    await page.waitForTimeout(500);
+  }
+  await page.getByRole('button', { name: 'Aprobar' }).first().waitFor({ timeout: 5_000 });
   await page.screenshot({ path: `${OUT}task-awaiting-approval.png` });
   await page.getByRole('button', { name: 'Aprobar' }).first().click();
   await page.locator('.step--done', { hasText: 'Tu OK · Ignacio' }).waitFor({ timeout: 5_000 });
@@ -67,6 +84,9 @@ try {
   check('Vista guiada (exprés) atenúa nodos fuera del recorrido', inRoute > 0 && dimmed === 25 - inRoute, `${inRoute} en recorrido, ${dimmed} atenuados`);
   await page.screenshot({ path: `${OUT}guided-express.png` });
   await page.getByRole('button', { name: 'Todo el sistema' }).click();
+  await page.waitForTimeout(1_500); // varias actualizaciones de telemetría tras cambiar de vista
+  const visibleAfterViews = await page.locator('[data-testid^="node-"]:visible').count();
+  check('Nodos visibles tras alternar vistas', visibleAfterViews === 25, `${visibleAfterViews}/25`);
 
   await page.locator('[data-testid="node-builder"]').click();
   await page.getByText('Configuración operativa').waitFor();
@@ -74,6 +94,8 @@ try {
   check('Inspector de nodo', true);
 
   // Gobierno: andon (O1) → banner → reanudar con nota → auditoría íntegra
+  await ensureLineRunning();
+  await page.waitForTimeout(500);
   page.once('dialog', (d) => void d.accept('Smoke: parada de prueba'));
   await page.getByRole('button', { name: /Parar línea/ }).click();
   await page.locator('.line-banner').waitFor({ timeout: 5_000 });

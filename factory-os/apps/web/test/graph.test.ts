@@ -15,6 +15,11 @@ describe('dashboard canvas', () => {
     expect(builder?.data.metrics?.health).toBe('running');
     expect(builder?.data.selected).toBe(true);
     expect(builder?.position).toEqual(nodePosition({ col: 4, layer: 3 }));
+    // Regresión: sin width/height explícitos React Flow puede ocultar nodos al reconstruir el array.
+    for (const n of flow) {
+      expect(n.width).toBeGreaterThan(0);
+      expect(n.height).toBeGreaterThan(0);
+    }
     for (const style of Object.values(CATEGORY_STYLE)) expect(style.badge.length).toBeGreaterThan(0);
 
     // sin solapes: posiciones únicas
