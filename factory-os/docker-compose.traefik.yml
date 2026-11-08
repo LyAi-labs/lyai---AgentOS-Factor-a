@@ -1,0 +1,17 @@
+# Despliegue en el servidor LyAi detrás del Traefik existente. Traefik usa el proveedor file:
+# el router vive en /home/lyai/traefik/config/routes.yml, no en labels. Sin puertos publicados.
+#   docker-compose -f docker-compose.yml -f docker-compose.traefik.yml up -d --build
+services:
+  web:
+    # Solo loopback: la extensión Factoría de VS Code lo embebe por portMapping (túnel SSH de VS Code).
+    # Por factory.lyai.pro (IP de Tailscale) el webview lo bloquea la protección local-network-access de Chromium.
+    ports: !override
+      - "127.0.0.1:8094:80"
+    networks:
+      default: {}
+      traefik:
+        aliases: [factory-os-web]
+networks:
+  traefik:
+    external: true
+    name: traefik_traefik

@@ -1,0 +1,35 @@
+{
+  "slug": "agentos-factor-a",
+  "nombre": "AgentOS Factor A · factory-os",
+  "repo": "LyAi-labs/lyai---AgentOS-Factor-a",
+  "repo_dir": "/opt/lyai/agentos-factor-a",
+  "rama_principal": "claude/compassionate-wozniak-2h4ztu",
+  "specs_dir": "/opt/lyai/wiki/pages/agentos-factor-a/factory/specs",
+  "state_dir": "/opt/lyai/state/factory/agentos-factor-a",
+  "vivo_dir": null,
+  "profundidad": "ligera",
+  "topes_usd": {
+    "dia_proyecto": 100.0,
+    "dia_total": 100.0,
+    "paso_builder": 3.0,
+    "paso_revisor": 0.5
+  },
+  "fuentes_entrada": {
+    "dependabot": false,
+    "loki_containers": []
+  },
+  "pruebas": {
+    "comandos": [
+      "cd factory-os && npm run verify"
+    ]
+  },
+  "despliegue": {
+    "modo": "a mano"
+  },
+  "riesgo": {
+    "sensible": [],
+    "siempre_4": [],
+    "visual_regex": "^(factory-os/apps/web/|frontend/)?(app|src/(components|ui|screens|views|lib)|assets|public)/|\\.(png|jpe?g|webp|svg|css|tsx|jsx)$",
+    "contexto_ux": "Herramienta interna de desarrollo y panel webview para VS Code (127.0.0.1:8094). Entorno exclusivamente de escritorio/IDE con raton/puntero de precision y espacio vertical altamente critico. Exenta expresamente por Ignacio de las normas tactiles de exterior/esqui (SD-EXT-01 guantes >= 48px y SD-COMP-04). Se autorizan explicitamente controles compactos de 22-28px, tipografia densa de 10-11px para KPIs y barras de una sola fila sin saltos de linea ni hints redundantes."
+  }
+}

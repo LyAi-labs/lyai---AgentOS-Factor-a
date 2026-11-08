@@ -1,0 +1,7 @@
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+artifacts
+.env
+docker/local-ca.crt

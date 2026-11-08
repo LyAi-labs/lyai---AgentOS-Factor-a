@@ -1,0 +1,28 @@
+{
+  "name": "@factory-os/server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsx watch --conditions=source src/main.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@factory-os/shared": "1.0.0",
+    "fastify": "5.12.7",
+    "pg": "8.23.1",
+    "ws": "8.22.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/pg": "8.23.1",
+    "@types/ws": "8.18.2",
+    "tsx": "4.23.15",
+    "vitest": "4.1.12"
+  }
+}
