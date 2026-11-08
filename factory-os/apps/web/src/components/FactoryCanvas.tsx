@@ -116,8 +116,8 @@ export function FactoryCanvas({ metrics, configs, selectedNodeId, theme, onSelec
         edges={edges}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.08 }}
-        minZoom={0.4}
+        fitViewOptions={{ padding: 0.06, minZoom: 0.15 }}
+        minZoom={0.15}
         maxZoom={2.5}
         nodesConnectable={false}
         nodesDraggable={false}
@@ -137,8 +137,19 @@ export function FactoryCanvas({ metrics, configs, selectedNodeId, theme, onSelec
 
 function Legend() {
   const counts = categoryCounts();
+  const [open, setOpen] = useState(false);
   return (
-    <div className="legend" aria-label="Leyenda">
+    <div className={open ? 'legend is-open' : 'legend'} aria-label="Leyenda">
+      <button
+        type="button"
+        className="legend__toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        Leyenda {open ? '▾' : '▸'}
+      </button>
+      {open && (
+      <>
       <div className="legend__group">
         {(Object.entries(CATEGORY_STYLE) as [NodeCategory, (typeof CATEGORY_STYLE)[NodeCategory]][]).map(([key, c]) => (
           <span key={key} className="legend__item">
@@ -165,6 +176,8 @@ function Legend() {
           </span>
         ))}
       </div>
+      </>
+      )}
     </div>
   );
 }
