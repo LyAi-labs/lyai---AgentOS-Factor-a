@@ -15,3 +15,4 @@
 - **Calibración del lienzo**: Documentada la lección técnica en la Wiki sobre calibración de `defaultViewport` / `minZoom` en ReactFlow frente al error de intentar reordenar nodos topológicos.
 - **Extensión VS Code**: Verificada la fusión de `listo/ext1` en la rama de trabajo.
 - **Persistencia**: Registrada lección en wiki compartida (`lesson-2026-11-07-factory-os-calibracion-lienzo-vs-topologia.md`), notificado canal Aurelius y ejecutado check de cierre AUR-065.
+- 2026-11-08 03:20 UTC · **Factoría (`cerrar.py`)** · Fusionada `listo/20261108-031745-ead8ce390140` (Compactación de cabecera y calibración de centrado del diagrama en Factory OS) en `claude/compassionate-wozniak-2h4ztu` (`12c2b12b`, 1 commit(s)) tras OK de Ignacio. Sin push ni despliegue.
