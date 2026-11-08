@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Background, BackgroundVariant, Controls, Handle, Position, ReactFlow } from '@xyflow/react';
-import type { NodeProps, NodeTypes, ReactFlowInstance } from '@xyflow/react';
+import { memo, useEffect, useMemo, useState } from 'react';
+import { Background, BackgroundVariant, Controls, Handle, Position, ReactFlow, useNodesInitialized, useReactFlow } from '@xyflow/react';
+import type { NodeProps, NodeTypes } from '@xyflow/react';
 import type { NodeCategory, NodeConfig, NodeMetrics } from '@factory-os/shared';
 import {
   buildFlowEdges,
@@ -75,6 +75,21 @@ const BandNode = memo(function BandNode({ data }: NodeProps<BandFlowNode>) {
 
 const nodeTypes: NodeTypes = { factory: FactoryNode, band: BandNode };
 
+function FlowAutofit({ viewId }: { viewId: string | null }) {
+  const nodesInitialized = useNodesInitialized();
+  const { fitView } = useReactFlow();
+  useEffect(() => {
+    if (!nodesInitialized) return;
+    void fitView({ padding: 0.08 });
+  }, [nodesInitialized, viewId, fitView]);
+  useEffect(() => {
+    const onResize = () => void fitView({ padding: 0.08 });
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [fitView]);
+  return null;
+}
+
 interface Props {
   metrics: readonly NodeMetrics[];
   configs: Readonly<Record<string, NodeConfig>>;
@@ -91,18 +106,6 @@ export function FactoryCanvas({ metrics, configs, selectedNodeId, theme, onSelec
     [metrics, configs, selectedNodeId, view],
   );
   const edges = useMemo(() => buildFlowEdges(metrics, view), [metrics, view]);
-  const rfRef = useRef<ReactFlowInstance<FlowNode> | null>(null);
-  const refit = useCallback(() => {
-    void rfRef.current?.fitView({ padding: 0.08 });
-  }, []);
-  useEffect(() => {
-    const t = setTimeout(refit, 100);
-    return () => clearTimeout(t);
-  }, [viewId, refit]);
-  useEffect(() => {
-    window.addEventListener('resize', refit);
-    return () => window.removeEventListener('resize', refit);
-  }, [refit]);
   return (
     <div className="canvas" aria-label="Lienzo de la factoría">
       <nav className="guided" aria-label="Vistas guiadas">
@@ -128,10 +131,6 @@ export function FactoryCanvas({ metrics, configs, selectedNodeId, theme, onSelec
         edges={edges}
         nodeTypes={nodeTypes}
         fitView
-        onInit={(instance) => {
-          rfRef.current = instance;
-          setTimeout(() => void instance.fitView({ padding: 0.08 }), 100);
-        }}
         fitViewOptions={{ padding: 0.08, minZoom: 0.15 }}
         minZoom={0.15}
         maxZoom={2.5}
@@ -145,6 +144,7 @@ export function FactoryCanvas({ metrics, configs, selectedNodeId, theme, onSelec
       >
         <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color="var(--grid-dot)" />
         <Controls showInteractive={false} position="top-left" />
+        <FlowAutofit viewId={viewId} />
       </ReactFlow>
       <Legend />
     </div>
