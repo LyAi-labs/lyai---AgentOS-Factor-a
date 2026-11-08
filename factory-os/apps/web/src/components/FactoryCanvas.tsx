@@ -69,6 +69,8 @@ const BandNode = memo(function BandNode({ data }: NodeProps<BandFlowNode>) {
       <span className="band__title">
         {data.code} / {data.name}
       </span>
+      <Handle type="target" position={Position.Left} style={{ display: 'none', opacity: 0 }} id="b-l" />
+      <Handle type="source" position={Position.Right} style={{ display: 'none', opacity: 0 }} id="b-r" />
     </div>
   );
 });
@@ -79,8 +81,9 @@ function FlowAutofit({ viewId }: { viewId: string | null }) {
   const nodesInitialized = useNodesInitialized();
   const { fitView } = useReactFlow();
   useEffect(() => {
-    if (!nodesInitialized) return;
     void fitView({ padding: 0.08 });
+    const timers = [60, 250, 800].map((ms) => window.setTimeout(() => void fitView({ padding: 0.08 }), ms));
+    return () => timers.forEach((t) => window.clearTimeout(t));
   }, [nodesInitialized, viewId, fitView]);
   useEffect(() => {
     const onResize = () => void fitView({ padding: 0.08 });
