@@ -12,7 +12,10 @@ export function LineBanner({ engine }: { engine: EngineState | null }) {
   return (
     <div className="line-banner" role="alert">
       <span className="line-banner__icon" aria-hidden>■</span>
-      <div className="line-banner__text">
+      <div
+        className="line-banner__text"
+        title={`Línea parada desde ${formatClock(engine.lineStoppedAt)}: ${engine.lineStopReason ?? ''}. No arranca ningún paso ni aprobación automática hasta reanudarla.`}
+      >
         <strong>Línea parada</strong> desde {formatClock(engine.lineStoppedAt)}: {engine.lineStopReason}
         <span className="line-banner__hint">No arranca ningún paso ni aprobación automática hasta reanudarla.</span>
       </div>

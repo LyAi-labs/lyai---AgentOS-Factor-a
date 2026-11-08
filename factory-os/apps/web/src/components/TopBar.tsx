@@ -37,7 +37,7 @@ export function TopBar({ connection, engine, metrics, theme, onToggleTheme }: Pr
     <header className="topbar">
       <div className="brand">
         <span className="brand__mark" aria-hidden>◆</span>
-        <div>
+        <div title={`Factoría IA de LyAi · ${engine ? formatClock(engine.simTime) : '—'} sim.`}>
           <h1>Factory OS</h1>
           <p>Factoría IA de LyAi · {engine ? formatClock(engine.simTime) : '—'} sim.</p>
         </div>
