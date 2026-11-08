@@ -95,8 +95,9 @@ h3 { font-size: 12px; margin-bottom: 6px; color: var(--ink-2); text-transform: u
 
 /* ─── Espacio de trabajo ─── */
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 420px; min-height: 0; }
-.canvas { position: relative; min-height: 0; height: 100%; }
-.canvas .react-flow { height: 100%; }
+.canvas { position: relative; min-height: 0; height: 100%; display: flex; flex-direction: column; }
+/* La barra de vistas ocupa su propia fila: superpuesta tapaba nodos tras el autofit. */
+.canvas .react-flow { flex: 1; min-height: 0; height: auto; }
 .canvas .react-flow { background: var(--bg); }
 .react-flow__controls { box-shadow: none; }
 .react-flow__controls-button { background: var(--surface-2); border-color: var(--border); fill: var(--ink-2); }
@@ -155,7 +156,7 @@ h3 { font-size: 12px; margin-bottom: 6px; color: var(--ink-2); text-transform: u
 
 /* Vistas guiadas */
 .guided {
-  position: absolute; z-index: 5; top: 10px; left: 56px; right: 12px; display: flex; gap: 6px; align-items: center;
+  position: relative; z-index: 5; margin: 6px 12px 0; flex: none; display: flex; gap: 6px; align-items: center;
   overflow-x: auto; padding: 3px 4px; scrollbar-width: none; -ms-overflow-style: none;
   background: color-mix(in srgb, var(--surface-1) 90%, transparent); border: 1px solid var(--border); border-radius: 10px;
 }
@@ -265,10 +266,14 @@ h3 { font-size: 12px; margin-bottom: 6px; color: var(--ink-2); text-transform: u
   .workspace { grid-template-columns: minmax(0, 1fr) 360px; }
   .panel__body { overflow: visible; }
   .panel { border-left: 0; border-top: 1px solid var(--border); }
-  .legend { max-width: calc(100% - 24px); bottom: auto; top: 12px; }
+  .legend { max-width: calc(100% - 24px); }
 }
 @media (max-width: 520px) {
   .topbar { padding: 2px 10px; grid-template-columns: auto minmax(0, 1fr) auto; }
+  /* En móvil el panel de 360px dejaba el lienzo en ~30px: se apilan lienzo y panel. */
+  .app { height: auto; min-height: 100%; grid-template-columns: minmax(0, 1fr); }
+  .controls { min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: 62vh auto; }
   .controls { flex-wrap: nowrap; }
   .form--grid { grid-template-columns: 1fr 1fr; }
   .metrics-grid { grid-template-columns: repeat(2, 1fr); }
